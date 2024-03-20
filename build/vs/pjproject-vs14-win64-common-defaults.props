@@ -12,6 +12,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <TargetMachine>MachineX64</TargetMachine>
+	  <AdditionalLibraryDirectories>C:\Projects\openssl\lib;</AdditionalLibraryDirectories>
     </Link>
     <Lib>
       <AdditionalOptions>/ignore:4221</AdditionalOptions>

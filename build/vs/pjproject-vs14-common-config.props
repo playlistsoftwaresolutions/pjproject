@@ -62,8 +62,5 @@
       <MinimalRebuild Condition="'$(API_Family)'=='UWP'">false</MinimalRebuild>
       <AdditionalIncludeDirectories>C:\Projects\openssl\include;</AdditionalIncludeDirectories>
     </ClCompile>
-      <Link>
-      <AdditionalLibraryDirectories>C:\Projects\openssl\lib;</AdditionalLibraryDirectories>
-    </Link>
   </ItemDefinitionGroup>
 </Project>
