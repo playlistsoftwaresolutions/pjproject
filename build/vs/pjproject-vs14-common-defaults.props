@@ -10,7 +10,7 @@
     <OutDir Condition="'$(TargetExt)'=='.lib'">..\lib\</OutDir>
     <OutDir Condition="'$(TargetExt)'=='.exe'">..\bin\</OutDir>
     <OutDir Condition="'$(TargetExt)'=='.dll'">..\lib\</OutDir>
-    <TargetName>$(ProjectName)-$(TargetCPU)-$(Platform)-vc$(VSVer)-$(Configuration)</TargetName>
+    <TargetName>$(ProjectName)</TargetName>
     <IntDir>.\output\$(ProjectName)-$(TargetCPU)-$(PlatformName)-vc$(VSVer)-$(Configuration)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup>
@@ -23,10 +23,10 @@
       <SDLCheck>false</SDLCheck>
     </ClCompile>
     <Lib>
-      <OutputFile>..\lib\$(ProjectName)-$(TargetCPU)-$(Platform)-vc$(VSVer)-$(Configuration).lib</OutputFile>
+      <OutputFile>..\lib\$(ProjectName).lib</OutputFile>
     </Lib>
     <Link>
-      <OutputFile  Condition="'$(TargetExt)'=='.exe'">..\bin\$(ProjectName)-$(TargetCPU)-$(Platform)-vc$(VSVer)-$(Configuration).exe</OutputFile>
+      <OutputFile  Condition="'$(TargetExt)'=='.exe'">..\bin\$(ProjectName).exe</OutputFile>
       <GenerateWindowsMetadata Condition="'$(TargetExt)'=='.lib'">false</GenerateWindowsMetadata>
     </Link>
   </ItemDefinitionGroup>
