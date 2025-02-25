@@ -75,7 +75,7 @@
 			/>
 			<Tool
 				Name="VCLibrarianTool"
-				OutputFile="..\..\lib\$(ProjectName)-$(TargetCPU)-$(PlatformName)-vc$(VSVer)-$(ConfigurationName).lib"
+				OutputFile="..\..\lib\$(ProjectName).lib"
 			/>
 			<Tool
 				Name="VCALinkTool"
@@ -267,7 +267,7 @@
 			/>
 			<Tool
 				Name="VCLibrarianTool"
-				OutputFile="..\..\lib\$(ProjectName)-$(TargetCPU)-$(PlatformName)-vc$(VSVer)-$(ConfigurationName).lib"
+				OutputFile="..\..\lib\$(ProjectName).lib"
 			/>
 			<Tool
 				Name="VCALinkTool"
@@ -457,7 +457,7 @@
 			/>
 			<Tool
 				Name="VCLibrarianTool"
-				OutputFile="..\..\lib\$(ProjectName)-$(TargetCPU)-$(PlatformName)-vc$(VSVer)-$(ConfigurationName).lib"
+				OutputFile="..\..\lib\$(ProjectName).lib"
 			/>
 			<Tool
 				Name="VCALinkTool"
@@ -649,7 +649,7 @@
 			/>
 			<Tool
 				Name="VCLibrarianTool"
-				OutputFile="..\..\lib\$(ProjectName)-$(TargetCPU)-$(PlatformName)-vc$(VSVer)-$(ConfigurationName).lib"
+				OutputFile="..\..\lib\$(ProjectName).lib"
 			/>
 			<Tool
 				Name="VCALinkTool"
@@ -839,7 +839,7 @@
 			/>
 			<Tool
 				Name="VCLibrarianTool"
-				OutputFile="..\..\lib\$(ProjectName)-$(TargetCPU)-$(PlatformName)-vc$(VSVer)-$(ConfigurationName).lib"
+				OutputFile="..\..\lib\$(ProjectName).lib"
 			/>
 			<Tool
 				Name="VCALinkTool"
@@ -1031,7 +1031,7 @@
 			/>
 			<Tool
 				Name="VCLibrarianTool"
-				OutputFile="..\..\lib\$(ProjectName)-$(TargetCPU)-$(PlatformName)-vc$(VSVer)-$(ConfigurationName).lib"
+				OutputFile="..\..\lib\$(ProjectName).lib"
 			/>
 			<Tool
 				Name="VCALinkTool"
@@ -1223,7 +1223,7 @@
 			/>
 			<Tool
 				Name="VCLibrarianTool"
-				OutputFile="..\..\lib\$(ProjectName)-$(TargetCPU)-$(PlatformName)-vc$(VSVer)-$(ConfigurationName).lib"
+				OutputFile="..\..\lib\$(ProjectName).lib"
 			/>
 			<Tool
 				Name="VCALinkTool"
@@ -1282,7 +1282,7 @@
 			/>
 			<Tool
 				Name="VCLibrarianTool"
-				OutputFile="..\..\lib\$(ProjectName)-$(TargetCPU)-$(PlatformName)-vc$(VSVer)-$(ConfigurationName).lib"
+				OutputFile="..\..\lib\$(ProjectName).lib"
 			/>
 			<Tool
 				Name="VCALinkTool"
@@ -1342,7 +1342,7 @@
 			/>
 			<Tool
 				Name="VCLibrarianTool"
-				OutputFile="..\..\lib\$(ProjectName)-$(TargetCPU)-$(PlatformName)-vc$(VSVer)-$(ConfigurationName).lib"
+				OutputFile="..\..\lib\$(ProjectName).lib"
 			/>
 			<Tool
 				Name="VCALinkTool"
@@ -1401,7 +1401,7 @@
 			/>
 			<Tool
 				Name="VCLibrarianTool"
-				OutputFile="..\..\lib\$(ProjectName)-$(TargetCPU)-$(PlatformName)-vc$(VSVer)-$(ConfigurationName).lib"
+				OutputFile="..\..\lib\$(ProjectName).lib"
 			/>
 			<Tool
 				Name="VCALinkTool"
@@ -1461,7 +1461,7 @@
 			/>
 			<Tool
 				Name="VCLibrarianTool"
-				OutputFile="..\..\lib\$(ProjectName)-$(TargetCPU)-$(PlatformName)-vc$(VSVer)-$(ConfigurationName).lib"
+				OutputFile="..\..\lib\$(ProjectName).lib"
 			/>
 			<Tool
 				Name="VCALinkTool"
@@ -1520,7 +1520,7 @@
 			/>
 			<Tool
 				Name="VCLibrarianTool"
-				OutputFile="..\..\lib\$(ProjectName)-$(TargetCPU)-$(PlatformName)-vc$(VSVer)-$(ConfigurationName).lib"
+				OutputFile="..\..\lib\$(ProjectName).lib"
 			/>
 			<Tool
 				Name="VCALinkTool"

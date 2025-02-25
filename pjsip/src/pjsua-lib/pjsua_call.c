@@ -2796,6 +2796,15 @@ PJ_DEF(pj_status_t) pjsua_call_answer2(pjsua_call_id call_id,
         }
     }
 
+	/* Call might have been disconnected if application is answering with
+	 * 200/OK and the media failed to start.
+	 */
+	if (call->inv == NULL) {
+		status = PJ_EPENDING;
+		PJ_LOG(2, (THIS_FILE, "The call inv is null. Call might have been disconnected or canceled"));
+		goto on_return;
+	}
+
     PJSUA_LOCK();
 
     /* Ticket #1526: When the incoming call contains no SDP offer, the media
@@ -2835,6 +2844,16 @@ PJ_DEF(pj_status_t) pjsua_call_answer2(pjsua_call_id call_id,
             goto on_return;
         }
     }
+
+	/* Call might have been disconnected if application is answering with
+	 * 200/OK and the media failed to start.
+	 */
+	if (call->inv == NULL) {
+		status = PJ_EPENDING;
+		PJ_LOG(2, (THIS_FILE, "The call inv is null. Call might have been disconnected or canceled"));
+		PJSUA_UNLOCK();
+		goto on_return;
+	}
 
     /* If media transport creation is not yet completed, we will answer
      * the call in the media transport creation callback instead.
@@ -2878,6 +2897,15 @@ PJ_DEF(pj_status_t) pjsua_call_answer2(pjsua_call_id call_id,
 
     if (reason && reason->slen == 0)
         reason = NULL;
+
+	/* Call might have been disconnected if application is answering with
+	 * 200/OK and the media failed to start.
+	 */
+	if (call->inv == NULL) {
+		status = PJ_EPENDING;
+		PJ_LOG(2, (THIS_FILE, "The call inv is null."));
+		goto on_return;
+	}
 
     /* Create response message */
     status = pjsip_inv_answer(call->inv, code, reason, NULL, &tdata);
@@ -3502,6 +3530,15 @@ PJ_DEF(pj_status_t) pjsua_call_update2(pjsua_call_id call_id,
         goto on_return;
     }
 
+	/* Call might have been disconnected if application is answering with
+	 * 200/OK and the media failed to start.
+	 */
+	if (call->inv == NULL) {
+		status = PJ_EPENDING;
+		PJ_LOG(2, (THIS_FILE, "The call inv is null. Call might have been disconnected or canceled"));
+		goto on_return;
+	}
+
     status = apply_call_setting(call, opt, NULL);
     if (status != PJ_SUCCESS) {
         pjsua_perror(THIS_FILE, "Failed to apply call setting", status);
@@ -3544,6 +3581,15 @@ PJ_DEF(pj_status_t) pjsua_call_update2(pjsua_call_id call_id,
             goto on_return;
         }
     }
+
+	/* Call might have been disconnected if application is answering with
+	 * 200/OK and the media failed to start.
+	 */
+	if (call->inv == NULL) {
+		status = PJ_EPENDING;
+		PJ_LOG(2, (THIS_FILE, "The call inv is null. Call might have been disconnected or canceled"));
+		goto on_return;
+	}
 
     /* Create UPDATE with new offer */
     status = pjsip_inv_update(call->inv, new_contact, sdp, &tdata);

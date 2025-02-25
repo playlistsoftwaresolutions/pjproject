@@ -1889,6 +1889,11 @@ pj_status_t call_media_on_event(pjmedia_event *event,
 void pjsua_set_media_tp_state(pjsua_call_media *call_med,
                               pjsua_med_tp_st tp_st)
 {
+	if (call_med->call == NULL) {
+		PJ_LOG(2, (THIS_FILE, "Call media call is null."));
+		return;
+	}
+
     if (!call_med->call->hanging_up &&
         pjsua_var.ua_cfg.cb.on_call_media_transport_state &&
         call_med->tp_st != tp_st)
