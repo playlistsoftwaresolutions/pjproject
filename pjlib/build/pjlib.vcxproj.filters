@@ -224,6 +224,9 @@
     <ClCompile Include="..\src\pj\ssl_sock_imp_common.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\pj\ssl_sock_schannel.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\pj\ioqueue_common_abs.h">
