@@ -20,8 +20,10 @@ BUILD_DIR="$PJSIP_DIR/build-ios"
 LOG_FILE="$BUILD_DIR/build.log"
 
 # Arquiteturas alvo
-IOS_ARCHS=("arm64" "armv7")
-SIMULATOR_ARCHS=("arm64" "x86_64")
+#IOS_ARCHS=("arm64" "armv7")
+#SIMULATOR_ARCHS=("arm64" "x86_64")
+IOS_ARCHS=("arm64")
+SIMULATOR_ARCHS=("x86_64")
 
 # Função para log
 log() {
@@ -154,91 +156,100 @@ build_architecture() {
     log "Build concluído para $arch"
 }
 
-# Função para combinar bibliotecas com lipo
+# Função para combinar bibliotecas com lipo (todas arquiteturas em uma pasta)
 create_fat_libraries() {
-    log "Criando bibliotecas universais (fat) com lipo..."
+    log "Criando bibliotecas universais (fat) com lipo (todas arquiteturas em uma pasta)..."
     
-    # Diretórios de saída
+    # Diretório de saída único
     local FAT_IOS_DIR="$BUILD_DIR/fat-ios"
-    local FAT_SIM_DIR="$BUILD_DIR/fat-simulator"
     
-    mkdir -p "$FAT_IOS_DIR" "$FAT_SIM_DIR"
+    mkdir -p "$FAT_IOS_DIR"
     
-    # Primeiro, vamos descobrir quais bibliotecas existem em comum entre as arquiteturas
-    # Para iOS device
-    local first_ios_arch="${IOS_ARCHS[0]}"
-    local first_ios_path="$BUILD_DIR/ios-$first_ios_arch/libs"
+    # Limpa diretório fat antes de começar
+    rm -f "$FAT_IOS_DIR"/*.a 2>/dev/null || true
     
-    if [ -d "$first_ios_path" ]; then
-        # Para cada biblioteca encontrada na primeira arquitetura
-        for lib in "$first_ios_path"/*.a; do
-            if [ -f "$lib" ]; then
-                local lib_name=$(basename "$lib")
-                local lipo_args=()
-                local has_all_archs=true
-                
-                # Coleta os caminhos da biblioteca para cada arquitetura iOS
-                for arch in "${IOS_ARCHS[@]}"; do
-                    local arch_lib="$BUILD_DIR/ios-$arch/libs/$lib_name"
-                    if [ -f "$arch_lib" ]; then
-                        lipo_args+=("-arch" "$arch" "$arch_lib")
-                    else
-                        log "  Biblioteca $lib_name não encontrada para arquitetura $arch"
-                        has_all_archs=false
-                        break
-                    fi
-                done
-                
-                # Se encontrou todas as arquiteturas, cria o fat binary
-                if [ "$has_all_archs" = true ] && [ ${#lipo_args[@]} -gt 0 ]; then
-                    log "Criando fat library para iOS: $lib_name"
-                    lipo "${lipo_args[@]}" -create -output "$FAT_IOS_DIR/$lib_name" || \
-                        warning "Falha ao criar fat library para $lib_name"
-                fi
-            fi
-        done
+    # Vamos usar a primeira arquitetura como referência para encontrar as bibliotecas
+    local first_arch="${IOS_ARCHS[0]}"
+    local reference_path="$BUILD_DIR/ios-$first_arch/libs"
+    
+    if [ ! -d "$reference_path" ]; then
+        warning "Diretório de referência não encontrado: $reference_path"
+        return 1
     fi
     
-    # Para Simulator
-    local first_sim_arch="${SIMULATOR_ARCHS[0]}"
-    local first_sim_path="$BUILD_DIR/simulator-$first_sim_arch/libs"
+    local lib_count=0
     
-    if [ -d "$first_sim_path" ]; then
-        # Para cada biblioteca encontrada na primeira arquitetura do simulator
-        for lib in "$first_sim_path"/*.a; do
-            if [ -f "$lib" ]; then
-                local lib_name=$(basename "$lib")
-                local lipo_args=()
-                local has_all_archs=true
-                
-                # Coleta os caminhos da biblioteca para cada arquitetura simulator
+    # Para cada biblioteca encontrada na arquitetura de referência
+    for lib in "$reference_path"/*.a; do
+        if [ -f "$lib" ]; then
+            local lib_name=$(basename "$lib")
+            local lipo_args=()
+            local has_all_archs=true
+            
+            # Adiciona arquiteturas do iOS device
+            for arch in "${IOS_ARCHS[@]}"; do
+                local arch_lib="$BUILD_DIR/ios-$arch/libs/$lib_name"
+                if [ -f "$arch_lib" ]; then
+                    lipo_args+=("-arch" "$arch" "$arch_lib")
+                else
+                    log "  Biblioteca $lib_name não encontrada para iOS $arch"
+                    has_all_archs=false
+                    break
+                fi
+            done
+            
+            # Se tem todas as arquiteturas iOS, adiciona as do simulator
+            if [ "$has_all_archs" = true ]; then
                 for arch in "${SIMULATOR_ARCHS[@]}"; do
                     local arch_lib="$BUILD_DIR/simulator-$arch/libs/$lib_name"
                     if [ -f "$arch_lib" ]; then
                         lipo_args+=("-arch" "$arch" "$arch_lib")
                     else
-                        log "  Biblioteca $lib_name não encontrada para arquitetura simulator $arch"
+                        log "  Biblioteca $lib_name não encontrada para Simulator $arch"
                         has_all_archs=false
                         break
                     fi
                 done
+            fi
+            
+            # Se encontrou todas as arquiteturas, cria o fat binary
+            if [ "$has_all_archs" = true ] && [ ${#lipo_args[@]} -gt 0 ]; then
+                log "Criando fat library com todas as arquiteturas: $lib_name"
+                log "  Arquiteturas: ${IOS_ARCHS[*]} ${SIMULATOR_ARCHS[*]}"
                 
-                # Se encontrou todas as arquiteturas, cria o fat binary
-                if [ "$has_all_archs" = true ] && [ ${#lipo_args[@]} -gt 0 ]; then
-                    log "Criando fat library para Simulator: $lib_name"
-                    lipo "${lipo_args[@]}" -create -output "$FAT_SIM_DIR/$lib_name" || \
-                        warning "Falha ao criar fat library para $lib_name"
+                lipo "${lipo_args[@]}" -create -output "$FAT_IOS_DIR/$lib_name" || \
+                    warning "Falha ao criar fat library para $lib_name"
+                
+                # Verifica o resultado
+                if [ -f "$FAT_IOS_DIR/$lib_name" ]; then
+                    local archs=$(lipo -info "$FAT_IOS_DIR/$lib_name" | sed 's/.*: //')
+                    log "  Biblioteca criada com arquiteturas: $archs"
+                    ((lib_count++))
                 fi
+            else
+                log "  Pulando $lib_name - arquiteturas incompletas"
+            fi
+        fi
+    done
+    
+    # Verifica os resultados
+    local total_count=$(ls -1 "$FAT_IOS_DIR"/*.a 2>/dev/null | wc -l)
+    
+    log "Criadas $total_count bibliotecas universais em: $FAT_IOS_DIR"
+    
+    if [ $total_count -eq 0 ]; then
+        warning "Nenhuma biblioteca encontrada para fazer lipo!"
+    else
+        # Mostra detalhes das bibliotecas criadas
+        echo -e "\n${GREEN}Detalhes das bibliotecas universais criadas:${NC}"
+        for lib in "$FAT_IOS_DIR"/*.a; do
+            if [ -f "$lib" ]; then
+                local lib_name=$(basename "$lib")
+                local archs=$(lipo -info "$lib" | sed 's/.*: //')
+                echo "  $lib_name: $archs"
             fi
         done
     fi
-    
-    # Verifica os resultados
-    local ios_count=$(ls -1 "$FAT_IOS_DIR"/*.a 2>/dev/null | wc -l)
-    local sim_count=$(ls -1 "$FAT_SIM_DIR"/*.a 2>/dev/null | wc -l)
-    
-    log "Criadas $ios_count bibliotecas universais para iOS device em: $FAT_IOS_DIR"
-    log "Criadas $sim_count bibliotecas universais para Simulator em: $FAT_SIM_DIR"
 }
 
 # Função para criar um arquivo de informação
@@ -290,13 +301,15 @@ main() {
     # Build para iOS device
     log "=== Build para iOS Device ==="
     for arch in "${IOS_ARCHS[@]}"; do
-        build_architecture "$arch" "ios"
+        #echo build_architecture "$arch" "ios"
+        echo $arch
     done
      
     # Build para Simulator
     log "=== Build para Simulator ==="
     for arch in "${SIMULATOR_ARCHS[@]}"; do
-        build_architecture "$arch" "simulator"
+        #build_architecture "$arch" "simulator"
+        echo $arch
     done
     
     # Combina bibliotecas com lipo
