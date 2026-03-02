@@ -18,6 +18,8 @@ MIN_IOS_VERSION="13.0"
 PJSIP_DIR=${1:-$(pwd)}  # Usa o diretório atual se não for especificado
 BUILD_DIR="$PJSIP_DIR/build-ios"
 LOG_FILE="$BUILD_DIR/build.log"
+PARENT_DIR="$(cd "$(dirname "$PJSIP_DIR")" && pwd)"
+OPENSSL_DIR="$PARENT_DIR/openssl-1.1.1"
 
 # Arquiteturas alvo
 #IOS_ARCHS=("arm64" "armv7")
@@ -116,7 +118,7 @@ build_architecture() {
     
     # Executa configure-iphone
     log "Executando configure-iphone para $arch..."
-    ./configure-iphone >> "$LOG_FILE" 2>&1 || error "Falha no configure-iphone para $arch"
+    ./configure-iphone --with-ssl=$OPENSSL_DIR >> "$LOG_FILE" 2>&1 || error "Falha no configure-iphone para $arch"
     
     # Build
     log "Compilando para $arch (isso pode levar alguns minutos)..."
@@ -301,15 +303,15 @@ main() {
     # Build para iOS device
     log "=== Build para iOS Device ==="
     for arch in "${IOS_ARCHS[@]}"; do
-        #echo build_architecture "$arch" "ios"
-        echo $arch
+        build_architecture "$arch" "ios"
+        #echo $arch
     done
      
     # Build para Simulator
     log "=== Build para Simulator ==="
     for arch in "${SIMULATOR_ARCHS[@]}"; do
-        #build_architecture "$arch" "simulator"
-        echo $arch
+        build_architecture "$arch" "simulator"
+        #echo $arch
     done
     
     # Combina bibliotecas com lipo
