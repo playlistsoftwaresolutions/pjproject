@@ -20,6 +20,7 @@ BUILD_DIR="$PJSIP_DIR/build-ios"
 LOG_FILE="$BUILD_DIR/build.log"
 PARENT_DIR="$(cd "$(dirname "$PJSIP_DIR")" && pwd)"
 OPENSSL_DIR="$PARENT_DIR/openssl-1.1.1"
+OPUS_DIR="$PARENT_DIR/Libs"
 
 # Arquiteturas alvo
 #IOS_ARCHS=("arm64" "armv7")
@@ -118,7 +119,9 @@ build_architecture() {
     
     # Executa configure-iphone
     log "Executando configure-iphone para $arch..."
-    ./configure-iphone --with-ssl=$OPENSSL_DIR >> "$LOG_FILE" 2>&1 || error "Falha no configure-iphone para $arch"
+    log "--with-ssl=$OPENSSL_DIR"
+    log "--with-opus=$OPUS_DIR"
+    ./configure-iphone --with-ssl=$OPENSSL_DIR --with-opus=$OPUS_DIR >> "$LOG_FILE" 2>&1 || error "Falha no configure-iphone para $arch"
     
     # Build
     log "Compilando para $arch (isso pode levar alguns minutos)..."
