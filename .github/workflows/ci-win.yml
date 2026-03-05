@@ -26,7 +26,7 @@ jobs:
     - name: MSBuild
       run: |
         call "%PROGRAMFILES%\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat"
-        msbuild pjproject-vs14.sln /p:PlatformToolset=v143 /p:Configuration=Debug /p:Platform=win32
+        msbuild pjproject-vs14.sln /p:PlatformToolset=V145 /p:Configuration=Debug /p:Platform=win32
       shell: cmd
     - name: build swig
       run: |
@@ -37,7 +37,7 @@ jobs:
         call "%PROGRAMFILES%\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat"
         set INCLUDE=%INCLUDE%;%JAVA_HOME%\include;%JAVA_HOME%\include\win32
         cd pjsip-apps/build
-        msbuild swig_java_pjsua2.vcxproj /p:PlatformToolset=v143 /p:Configuration=Debug /p:Platform=win32 /p:UseEnv=true
+        msbuild swig_java_pjsua2.vcxproj /p:PlatformToolset=V145 /p:Configuration=Debug /p:Platform=win32 /p:UseEnv=true
       shell: cmd
 
   windows-with-openssl-unit-test-1:
@@ -73,7 +73,7 @@ jobs:
         call "%PROGRAMFILES%\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat"
         set INCLUDE=%INCLUDE%;%OPENSSL_DIR%\include
         set LIB=%LIB%;%OPENSSL_DIR%\lib
-        msbuild pjproject-vs14.sln /p:PlatformToolset=v143 /p:Configuration=Release /p:Platform=win32 /p:UseEnv=true
+        msbuild pjproject-vs14.sln /p:PlatformToolset=V145 /p:Configuration=Release /p:Platform=win32 /p:UseEnv=true
       shell: cmd
     - name: unit tests
       run: |
@@ -117,7 +117,7 @@ jobs:
         call "%PROGRAMFILES%\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat"
         set INCLUDE=%INCLUDE%;%OPENSSL_DIR%\include
         set LIB=%LIB%;%OPENSSL_DIR%\lib
-        msbuild pjproject-vs14.sln /p:PlatformToolset=v143 /p:Configuration=Release /p:Platform=win32 /p:UseEnv=true
+        msbuild pjproject-vs14.sln /p:PlatformToolset=V145 /p:Configuration=Release /p:Platform=win32 /p:UseEnv=true
       shell: cmd
     - name: build test tools cmp_wav
       run: |
@@ -126,7 +126,7 @@ jobs:
         set INCLUDE=%INCLUDE%;%OPENSSL_DIR%\include
         set LIB=%LIB%;%OPENSSL_DIR%\lib
         call "%PROGRAMFILES%\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat"
-        msbuild cmp_wav.vcxproj /p:PlatformToolset=v143 /p:Configuration=Release /p:Platform=win32 /p:UseEnv=true
+        msbuild cmp_wav.vcxproj /p:PlatformToolset=V145 /p:Configuration=Release /p:Platform=win32 /p:UseEnv=true
       shell: cmd
     - name: set up Python 3.10 for pjsua test
       uses: actions/setup-python@v4
@@ -175,7 +175,7 @@ jobs:
         call "%PROGRAMFILES%\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat"
         set INCLUDE=%INCLUDE%;%GNUTLS_DIR%\include
         set LIB=%LIB%;%GNUTLS_DIR%\lib
-        msbuild pjproject-vs14.sln /p:PlatformToolset=v143 /p:Configuration=Release /p:Platform=win32 /p:UseEnv=true
+        msbuild pjproject-vs14.sln /p:PlatformToolset=V145 /p:Configuration=Release /p:Platform=win32 /p:UseEnv=true
       shell: cmd
 
   windows-with-video-libvpx-unit-test-1:
@@ -249,7 +249,7 @@ jobs:
         call "%PROGRAMFILES%\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat"
         set INCLUDE=%INCLUDE%;%OPENSSL_DIR%\include;%VPX_DIR%\include;%SDL_DIR%\include
         set LIB=%LIB%;%OPENSSL_DIR%\lib;%VPX_DIR%\lib;%SDL_DIR%\lib\x86
-        msbuild pjproject-vs14.sln /p:PlatformToolset=v143 /p:Configuration=Release /p:Platform=win32 /p:UseEnv=true
+        msbuild pjproject-vs14.sln /p:PlatformToolset=V145 /p:Configuration=Release /p:Platform=win32 /p:UseEnv=true
       shell: cmd
     - name: build test tools cmp_wav
       run: |
@@ -260,7 +260,7 @@ jobs:
         set INCLUDE=%INCLUDE%;%OPENSSL_DIR%\include;%VPX_DIR%\include;%SDL_DIR%\include
         set LIB=%LIB%;%OPENSSL_DIR%\lib;%VPX_DIR%\lib;%SDL_DIR%\lib\x86
         call "%PROGRAMFILES%\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat"
-        msbuild cmp_wav.vcxproj /p:PlatformToolset=v143 /p:Configuration=Release /p:Platform=win32 /p:UseEnv=true
+        msbuild cmp_wav.vcxproj /p:PlatformToolset=V145 /p:Configuration=Release /p:Platform=win32 /p:UseEnv=true
       shell: cmd
     - name: set up Python 3.10 for pjsua test
       uses: actions/setup-python@v4
@@ -331,5 +331,5 @@ jobs:
         call "%PROGRAMFILES%\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat"
         set INCLUDE=%INCLUDE%;%LIBFFMPEG_DIR%\include;%SDL_DIR%\include
         set LIB=%LIB%;%FFMPEG_DIR%\lib;%SDL_DIR%\lib\x86
-        msbuild pjproject-vs14.sln /p:PlatformToolset=v143 /p:Configuration=Release /p:Platform=win32 /p:UseEnv=true
+        msbuild pjproject-vs14.sln /p:PlatformToolset=V145 /p:Configuration=Release /p:Platform=win32 /p:UseEnv=true
       shell: cmd
