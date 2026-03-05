@@ -690,6 +690,43 @@
 #   define PJ_ACTIVESOCK_MAX_CONSECUTIVE_ACCEPT_ERROR 50
 #endif
 
+
+/*
+ * I/O queue implementation backends.
+ * Select one of these implementations in PJ_IOQUEUE_IMP.
+ */
+
+/** No/dummy I/O queue */
+#define PJ_IOQUEUE_IMP_NONE         0
+
+/** Using select() */
+#define PJ_IOQUEUE_IMP_SELECT       1
+
+/** Using epoll() (experimental) */
+#define PJ_IOQUEUE_IMP_EPOLL        2
+
+/** Using Windows I/O Completion Ports (experimental) */
+#define PJ_IOQUEUE_IMP_IOCP         3
+
+/** Using MacOS/BSD kqueue (experimental) */
+#define PJ_IOQUEUE_IMP_KQUEUE       4
+
+/** Using Windows UWP socket (deprecated) */
+#define PJ_IOQUEUE_IMP_UWP          5
+
+/** Using Symbian (deprecated) */
+#define PJ_IOQUEUE_IMP_SYMBIAN      6
+
+/**
+ * I/O queue implementation backend.
+ *
+ * Default: PJ_IOQUEUE_IMP_SELECT
+ */
+#ifndef PJ_IOQUEUE_IMP
+#   define PJ_IOQUEUE_IMP               PJ_IOQUEUE_IMP_SELECT
+#endif
+
+
 /**
  * Constants for declaring the maximum handles that can be supported by
  * a single IOQ framework. This constant might not be relevant to the 
@@ -771,6 +808,21 @@
  */
 #ifndef PJ_IOQUEUE_DEFAULT_EPOLL_FLAGS
 #   define PJ_IOQUEUE_DEFAULT_EPOLL_FLAGS PJ_IOQUEUE_EPOLL_AUTO
+#endif
+
+
+/**
+ * This setting ensures that the read callback is invoked without holding
+ * the key mutex, even when concurrency is disabled.
+ *
+ * Note: This may introduce a race condition between key unregistration
+ * and the read callback. Therefore, the application must be prepared
+ * to handle a read callback even after pj_ioqueue_unregister() has returned.
+ *
+ * Default: 0 (disabled).
+ */
+#ifndef PJ_IOQUEUE_CALLBACK_NO_LOCK
+#   define PJ_IOQUEUE_CALLBACK_NO_LOCK  0
 #endif
 
 
@@ -1068,7 +1120,7 @@
 /** Using OpenSSL */
 #define PJ_SSL_SOCK_IMP_OPENSSL     1
 
-/**< Using GnuTLS */
+/** Using GnuTLS */
 #define PJ_SSL_SOCK_IMP_GNUTLS      2
 
 /** Using Apple's Secure Transport (deprecated in MacOS 10.15 & iOS 13.0) */
@@ -1079,6 +1131,9 @@
 
 /** Using Windows's Schannel */
 #define PJ_SSL_SOCK_IMP_SCHANNEL    5
+
+/** Using Mbed TLS */
+#define PJ_SSL_SOCK_IMP_MBEDTLS     6
 
 /**
  * Select which SSL socket implementation to use. Currently pjlib supports
@@ -1176,6 +1231,55 @@
 #  define PJ_JNI_HAS_JNI_ONLOAD             PJ_ANDROID
 #endif
 
+/**
+ * pj_atomic_slist implementation.
+ * Select one of these implementations in PJ_ATOMIC_SLIST_IMPLEMENTATION.
+ */
+ /** Using os independent "cross-platform" implementation */
+#define PJ_ATOMIC_SLIST_GENERIC             0
+
+ /** Using Windows's single linked list */
+#define PJ_ATOMIC_SLIST_WIN32               1
+
+/**
+ * Select which pj_atomic_slist implementation to use. Currently pjlib supports
+ * PJ_ATOMIC_SLIST_GENERIC, which uses internal pjsip os independent 
+ * "cross-platform" implementation, and 
+ * PJ_ATOMIC_SLIST_WIN32, which uses Windows's single linked list.
+ * The last option is very fast, but is supported on Windows platform only.
+ *
+ * Default is PJ_ATOMIC_SLIST_WIN32 on Windows platform, 
+ *            otherwise PJ_ATOMIC_SLIST_GENERIC.
+ */
+#ifndef PJ_ATOMIC_SLIST_IMPLEMENTATION
+#   ifdef PJ_WIN32
+#       define PJ_ATOMIC_SLIST_IMPLEMENTATION   PJ_ATOMIC_SLIST_WIN32
+#   else
+#       define PJ_ATOMIC_SLIST_IMPLEMENTATION   PJ_ATOMIC_SLIST_GENERIC
+#   endif // PJ_WIN32
+#endif  //PJ_ATOMIC_SLIST_IMPLEMENTATION
+
+/**
+ * File I/O backend implementation.
+ * Select one of these implementations in PJ_FILE_IO.
+ * By default, PJ_FILE_IO_WIN32 is selected on Windows platform,
+ * otherwise PJ_FILE_IO_ANSI is selected.
+ * 
+ * select ioqueue supports both backend under Windows, but IOCP
+ * supports Win32 file I/O only.
+ */
+#define PJ_FILE_IO_WIN32 0  /* Using Win32 file I/O  */
+#define PJ_FILE_IO_ANSI 1   /* Using ANSI C file I/O */
+
+#ifndef PJ_FILE_IO
+#   ifdef PJ_WIN32
+#       define PJ_FILE_IO   PJ_FILE_IO_WIN32
+#   else
+#       define PJ_FILE_IO   PJ_FILE_IO_ANSI
+#   endif // PJ_WIN32
+#elif PJ_FILE_IO == PJ_FILE_IO_ANSI && PJ_IOQUEUE_IMP == PJ_IOQUEUE_IMP_IOCP
+#   error IOCP ioqueue does not support ANSI file backend
+#endif  //PJ_FILE_IO
 
 /** @} */
 
@@ -1496,7 +1600,7 @@ PJ_BEGIN_DECL
 #define PJ_VERSION_NUM_MAJOR    2
 
 /** PJLIB version minor number. */
-#define PJ_VERSION_NUM_MINOR    15
+#define PJ_VERSION_NUM_MINOR    16
 
 /** PJLIB version revision number. */
 #define PJ_VERSION_NUM_REV      1

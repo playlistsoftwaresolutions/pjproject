@@ -40,6 +40,11 @@
 #include <pj/errno.h>
 #include <pj/rand.h>
 
+
+/* Only build when the backend is using select(). */
+#if PJ_IOQUEUE_IMP == PJ_IOQUEUE_IMP_SELECT
+
+
 /* Now that we have access to OS'es <sys/select>, lets check again that
  * PJ_IOQUEUE_MAX_HANDLES is not greater than FD_SETSIZE
  */
@@ -549,43 +554,23 @@ PJ_DEF(pj_status_t) pj_ioqueue_unregister( pj_ioqueue_key_t *key)
      */
     pj_lock_release(ioqueue->lock);
 
-#if PJ_IOQUEUE_HAS_SAFE_UNREG
     /* Mark key is closing. */
     key->closing = 1;
 
+    pj_ioqueue_unlock_key(key);
+
+#if PJ_IOQUEUE_HAS_SAFE_UNREG
     /* Decrement counter. */
     decrement_counter(key);
+#else
+    /* Destroy the key lock */
+    pj_lock_destroy(key->lock);
+#endif
 
     /* Done. */
     if (key->grp_lock) {
-        /* just dec_ref and unlock. we will set grp_lock to NULL
-         * elsewhere */
-        pj_grp_lock_t *grp_lock = key->grp_lock;
-        // Don't set grp_lock to NULL otherwise the other thread
-        // will crash. Just leave it as dangling pointer, but this
-        // should be safe
-        //key->grp_lock = NULL;
-        pj_grp_lock_dec_ref_dbg(grp_lock, "ioqueue", 0);
-        pj_grp_lock_release(grp_lock);
-    } else {
-        pj_ioqueue_unlock_key(key);
+        pj_grp_lock_dec_ref_dbg(key->grp_lock, "ioqueue", 0);
     }
-#else
-    if (key->grp_lock) {
-        /* set grp_lock to NULL and unlock */
-        pj_grp_lock_t *grp_lock = key->grp_lock;
-        // Don't set grp_lock to NULL otherwise the other thread
-        // will crash. Just leave it as dangling pointer, but this
-        // should be safe
-        //key->grp_lock = NULL;
-        pj_grp_lock_dec_ref_dbg(grp_lock, "ioqueue", 0);
-        pj_grp_lock_release(grp_lock);
-    } else {
-        pj_ioqueue_unlock_key(key);
-    }
-
-    pj_lock_destroy(key->lock);
-#endif
 
     return PJ_SUCCESS;
 }
@@ -1142,3 +1127,5 @@ PJ_DEF(pj_oshandle_t) pj_ioqueue_get_os_handle( pj_ioqueue_t *ioqueue )
     PJ_UNUSED_ARG(ioqueue);
     return NULL;
 }
+
+#endif /* PJ_IOQUEUE_IMP == PJ_IOQUEUE_IMP_SELECT */

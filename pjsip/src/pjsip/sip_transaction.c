@@ -140,6 +140,7 @@ static int max_retrans_count = -1;
 #define TRANSPORT_ERR_TIMER     3
 #define TRANSPORT_DISC_TIMER    4
 #define TERMINATE_TIMER         5
+#define TRANSPORT_CB_TIMER      6
 
 /* Flags for tsx_set_state() */
 enum
@@ -2167,8 +2168,11 @@ static void send_msg_callback( pjsip_send_state *send_state,
 
         /* Also stop processing if transaction has been flagged with
          * pending destroy (https://github.com/pjsip/pjproject/issues/906)
+         * or if transaction is cancelled by app.
          */
-        if ((!*cont) || (tsx->transport_flag & TSX_HAS_PENDING_DESTROY)) {
+        if ((!*cont) || (tsx->transport_flag & TSX_HAS_PENDING_DESTROY) ||
+            -sent == PJ_ECANCELLED)
+        {
             char errmsg[PJ_ERR_MSG_SIZE];
             pjsip_status_code sc;
             pj_str_t err;
@@ -2192,10 +2196,13 @@ static void send_msg_callback( pjsip_send_state *send_state,
              * since with 503 normally client should try again.
              * See https://github.com/pjsip/pjproject/issues/870
              */
-            if (-sent==PJ_ERESOLVE || -sent==PJLIB_UTIL_EDNS_NXDOMAIN)
+            if (-sent==PJ_ERESOLVE || -sent==PJLIB_UTIL_EDNS_NXDOMAIN ||
+                -sent==PJ_ECANCELLED)
+            {
                 sc = PJSIP_SC_BAD_GATEWAY;
-            else
+            } else {
                 sc = PJSIP_SC_TSX_TRANSPORT_ERROR;
+            }
 
             /* For UAC tsx, we directly terminate the transaction.
              * For UAS tsx, we terminate the transaction for 502 error,
@@ -2265,23 +2272,21 @@ static void send_msg_callback( pjsip_send_state *send_state,
 }
 
 
-/* Transport callback. */
-static void transport_callback(void *token, pjsip_tx_data *tdata,
-                               pj_ssize_t sent)
+/* Transport callback parameter. */
+struct tp_cb_param {
+    pjsip_transaction* tsx;
+    pjsip_tx_data* tdata;
+    pj_ssize_t sent;
+};
+
+
+/* Transport callback actual implementation. */
+static void transport_callback_impl(pjsip_transaction *tsx,
+                                    pjsip_tx_data* tdata,
+                                    pj_ssize_t sent)
 {
-    pjsip_transaction *tsx = (pjsip_transaction*) token;
-
-    /* Check if the transaction layer has been shutdown. */
-    if (mod_tsx_layer.mod.id < 0)
-        return;
-
-    /* In other circumstances, locking tsx->grp_lock AFTER transport mutex
-     * will introduce deadlock if another thread is currently sending a
-     * SIP message to the transport. But this should be safe as there should
-     * be no way this callback could be called while another thread is
-     * sending a message.
-     */
     pj_grp_lock_acquire(tsx->grp_lock);
+
     tsx->transport_flag &= ~(TSX_HAS_PENDING_TRANSPORT);
 
     if (sent > 0 || tsx->role == PJSIP_ROLE_UAS) {
@@ -2299,6 +2304,7 @@ static void transport_callback(void *token, pjsip_tx_data *tdata,
             tsx_set_state( tsx, PJSIP_TSX_STATE_DESTROYED,
                            PJSIP_EVENT_UNKNOWN, NULL, 0 );
             pj_grp_lock_release(tsx->grp_lock);
+            pj_grp_lock_dec_ref(tsx->grp_lock);
             return;
         }
 
@@ -2351,6 +2357,79 @@ static void transport_callback(void *token, pjsip_tx_data *tdata,
 
     /* Decrease pending send counter */
     pj_grp_lock_dec_ref(tsx->grp_lock);
+}
+
+
+/* Timer callback for transport callback.
+ * This is currently only used to avoid deadlock due to inversed locking order
+ * between transport and transaction.
+ */
+static void tsx_misc_timer_callback(pj_timer_heap_t *theap,
+                                    pj_timer_entry *entry)
+{
+    PJ_UNUSED_ARG(theap);
+
+    if (entry->id == TRANSPORT_CB_TIMER) {
+        struct tp_cb_param* param = (struct tp_cb_param*)entry->user_data;
+
+        /* Check if the transaction layer has been shutdown. */
+        if (mod_tsx_layer.mod.id >= 0) {
+            /* Call transport callback implementation */
+            transport_callback_impl(param->tsx, param->tdata, param->sent);
+        }
+
+        /* Release tdata */
+        pjsip_tx_data_dec_ref(param->tdata);
+    }
+}
+
+
+/* Transport callback. */
+static void transport_callback(void *token, pjsip_tx_data *tdata,
+                               pj_ssize_t sent)
+{
+    pjsip_transaction *tsx = (pjsip_transaction*) token;
+    pj_status_t status;
+
+    /* Check if the transaction layer has been shutdown. */
+    if (mod_tsx_layer.mod.id < 0)
+        return;
+
+    /* In other circumstances, locking tsx->grp_lock AFTER transport mutex
+     * will introduce deadlock if another thread is currently sending a
+     * SIP message to the transport. But this should be safe as there should
+     * be no way this callback could be called while another thread is
+     * sending a message.
+     */
+    // Deadlock does happen, see #4453.
+    // So now, to avoid deadlock, we'll try to acquire the group lock first,
+    // and if it fails, we'll schedule the processing via timer.
+    status = pj_grp_lock_tryacquire(tsx->grp_lock);
+    if (status != PJ_SUCCESS) {
+        pj_time_val delay = { 0, 0 };
+        struct tp_cb_param *param = NULL;
+
+        lock_timer(tsx);
+        tsx_cancel_timer(tsx, &tsx->misc_timer);
+
+        /* Increment tdata ref count to avoid premature destruction.
+         * Note that tsx ref count is already handled by tsx_schedule_timer().
+         */
+        pjsip_tx_data_add_ref(tdata);
+
+        param = PJ_POOL_ZALLOC_T(tsx->pool, struct tp_cb_param);
+        param->sent = sent;
+        param->tdata = tdata;
+        param->tsx = tsx;
+        pj_timer_entry_init(&tsx->misc_timer, TIMER_INACTIVE, param,
+                            &tsx_misc_timer_callback);
+        tsx_schedule_timer(tsx, &tsx->misc_timer, &delay, TRANSPORT_CB_TIMER);
+        unlock_timer(tsx);
+        return;
+    }
+
+    transport_callback_impl(tsx, tdata, sent);
+    pj_grp_lock_release(tsx->grp_lock);
 }
 
 
@@ -2572,6 +2651,8 @@ PJ_DEF(pj_status_t) pjsip_tsx_retransmit_no_state(pjsip_transaction *tsx,
 {
     pj_status_t status;
 
+    PJ_ASSERT_RETURN(tsx != NULL, PJ_EINVAL);
+
     pj_grp_lock_acquire(tsx->grp_lock);
     if (tdata == NULL) {
         tdata = tsx->last_tx;
@@ -2586,7 +2667,7 @@ PJ_DEF(pj_status_t) pjsip_tsx_retransmit_no_state(pjsip_transaction *tsx,
     if (status == PJ_SUCCESS) {
         pjsip_tx_data_dec_ref(tdata);
     }
-
+   
     return status;
 }
 

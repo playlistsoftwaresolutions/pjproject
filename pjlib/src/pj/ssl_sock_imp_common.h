@@ -138,6 +138,7 @@ struct pj_ssl_sock_t
                                              * data is queuing in wbio.     */
     write_data_t          send_pending; /* list of pending write to network */
     pj_lock_t            *write_mutex;  /* protect write BIO and send_buf   */
+    pj_lock_t            *asock_send_mutex; /* protect send order */
 
     circ_buf_t            circ_buf_input;
     pj_lock_t            *circ_buf_input_mutex;
@@ -153,16 +154,20 @@ struct pj_ssl_sock_t
 struct pj_ssl_cert_t
 {
 #if (PJ_SSL_SOCK_IMP != PJ_SSL_SOCK_IMP_SCHANNEL)
+    /* Certificate files. */
     pj_str_t CA_file;
     pj_str_t CA_path;
     pj_str_t cert_file;
     pj_str_t privkey_file;
     pj_str_t privkey_pass;
 
-    /* Certificate buffer. */
+    /* Certificate buffers. */
     pj_ssl_cert_buffer CA_buf;
     pj_ssl_cert_buffer cert_buf;
     pj_ssl_cert_buffer privkey_buf;
+
+    /* Certificate direct (backend specific instances). */
+    pj_ssl_cert_direct direct;
 #else
     pj_ssl_cert_lookup_criteria criteria;
 #endif

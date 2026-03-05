@@ -602,6 +602,9 @@ static pj_status_t flush_circ_buf_output(pj_ssl_sock_t *ssock,
     wdata->flags = flags;
     io_read(ssock, &ssock->circ_buf_output, (pj_uint8_t *)&wdata->data, len);
 
+    /* Ticket #4533: Lock before write_mutex release, make sure send order is correct */
+    pj_lock_acquire(ssock->asock_send_mutex);
+
     /* Ticket #1573: Don't hold mutex while calling PJLIB socket send(). */
     pj_lock_release(ssock->write_mutex);
 
@@ -622,6 +625,8 @@ static pj_status_t flush_circ_buf_output(pj_ssl_sock_t *ssock,
                                       ssock->addr_len);
     }
 #endif
+
+    pj_lock_release(ssock->asock_send_mutex);
 
     if (status != PJ_EPENDING) {
         /* When the sending is not pending, remove the wdata from send
@@ -735,6 +740,11 @@ static void ssl_on_destroy(void *arg)
         ssock->write_mutex = NULL;
     }
 
+    if (ssock->asock_send_mutex) {
+        pj_lock_destroy(ssock->asock_send_mutex);
+        ssock->asock_send_mutex = NULL;
+    }
+
     /* Secure release pool, i.e: all memory blocks will be zeroed first */
     pj_pool_secure_release(&ssock->info_pool);
     pj_pool_secure_release(&ssock->pool);
@@ -844,7 +854,7 @@ static pj_bool_t ssock_on_data_read (pj_ssl_sock_t *ssock,
 
             } else if (status_ == PJ_SUCCESS) {
                 break;
-            } else if (status_ == PJ_EEOF) {
+            } else if (status_ == PJ_ETRYAGAIN) {
                 status = ssl_do_handshake(ssock);
                 if (status == PJ_SUCCESS) {
                     /* Renegotiation completed */
@@ -867,6 +877,11 @@ static pj_bool_t ssock_on_data_read (pj_ssl_sock_t *ssock,
                                      "Failed to flush delayed send"));
                         goto on_error;
                     }
+
+                    /* If renego has been completed, continue reading data */
+                    if (status == PJ_SUCCESS)
+                        continue;
+
                 } else if (status != PJ_EPENDING) {
                     PJ_PERROR(1,(ssock->pool->obj_name, status, 
                                  "Renegotiation failed"));
@@ -1169,9 +1184,16 @@ static pj_bool_t ssock_on_accept_complete (pj_ssl_sock_t *ssock_parent,
     }
 
     /* Start SSL handshake */
+    /* Prevent data race with on_data_read() until ssl_do_handshake()
+     * completes.
+     */
+    if (ssock->circ_buf_input_mutex)
+        pj_lock_acquire(ssock->circ_buf_input_mutex);
     ssock->ssl_state = SSL_STATE_HANDSHAKING;
     ssl_set_state(ssock, PJ_TRUE);
     status = ssl_do_handshake(ssock);
+    if (ssock->circ_buf_input_mutex)
+        pj_lock_release(ssock->circ_buf_input_mutex);
 
 on_return:
     if (ssock && status != PJ_EPENDING) {
@@ -1496,8 +1518,14 @@ PJ_DEF(pj_status_t) pj_ssl_sock_create (pj_pool_t *pool,
         return status;
 
     /* Create input circular buffer mutex */
-    status = pj_lock_create_simple_mutex(pool, pool->obj_name,
-                                         &ssock->circ_buf_input_mutex);
+    status = pj_lock_create_recursive_mutex(pool, pool->obj_name,
+                                            &ssock->circ_buf_input_mutex);
+    if (status != PJ_SUCCESS)
+        return status;
+
+    /* Create active socket send mutex */
+    status = pj_lock_create_recursive_mutex(pool, pool->obj_name,
+                                            &ssock->asock_send_mutex);
     if (status != PJ_SUCCESS)
         return status;
 
@@ -1548,7 +1576,7 @@ PJ_DEF(pj_status_t) pj_ssl_sock_close(pj_ssl_sock_t *ssock)
     /* Wipe out cert & key buffer. */
     if (ssock->cert) {
         pj_ssl_cert_wipe_keys(ssock->cert);
-        ssock->cert = NULL;
+        //ssock->cert = NULL;
     }
 
     if (ssock->param.grp_lock) {
@@ -1789,7 +1817,7 @@ static pj_status_t ssl_send (pj_ssl_sock_t *ssock,
     if (status == PJ_SUCCESS && nwritten == size) {
         /* All data written, flush write buffer to network socket */
         status = flush_circ_buf_output(ssock, send_key, size, flags);
-    } else if (status == PJ_EEOF) {
+    } else if (status == PJ_ETRYAGAIN) {
         /* Re-negotiation is on progress, flush re-negotiation data */
         status = flush_circ_buf_output(ssock, &ssock->handshake_op_key, 0, 0);
         if (status == PJ_SUCCESS || status == PJ_EPENDING) {
@@ -2313,20 +2341,31 @@ PJ_DEF(pj_status_t) pj_ssl_cert_load_from_files2(pj_pool_t *pool,
 #if (PJ_SSL_SOCK_IMP != PJ_SSL_SOCK_IMP_SCHANNEL)
     pj_ssl_cert_t *cert;
 
-    PJ_ASSERT_RETURN(pool && (CA_file || CA_path) && cert_file &&
-                     privkey_file,
+    PJ_ASSERT_RETURN(pool && p_cert &&
+                     (CA_file || CA_path || cert_file || privkey_file),
                      PJ_EINVAL);
 
-    cert = PJ_POOL_ZALLOC_T(pool, pj_ssl_cert_t);
+    cert = *p_cert;
+    if (!cert)
+        cert = PJ_POOL_ZALLOC_T(pool, pj_ssl_cert_t);
+    if (!cert)
+        return PJ_ENOMEM;
+
     if (CA_file) {
         pj_strdup_with_null(pool, &cert->CA_file, CA_file);
     }
     if (CA_path) {
         pj_strdup_with_null(pool, &cert->CA_path, CA_path);
     }
-    pj_strdup_with_null(pool, &cert->cert_file, cert_file);
-    pj_strdup_with_null(pool, &cert->privkey_file, privkey_file);
-    pj_strdup_with_null(pool, &cert->privkey_pass, privkey_pass);
+    if (cert_file) {
+        pj_strdup_with_null(pool, &cert->cert_file, cert_file);
+    }
+    if (privkey_file) {
+        pj_strdup_with_null(pool, &cert->privkey_file, privkey_file);
+    }
+    if (privkey_pass) {
+        pj_strdup_with_null(pool, &cert->privkey_pass, privkey_pass);
+    }
 
     *p_cert = cert;
 
@@ -2353,13 +2392,28 @@ PJ_DEF(pj_status_t) pj_ssl_cert_load_from_buffer(pj_pool_t *pool,
 #if (PJ_SSL_SOCK_IMP != PJ_SSL_SOCK_IMP_SCHANNEL)
     pj_ssl_cert_t *cert;
 
-    PJ_ASSERT_RETURN(pool && CA_buf && cert_buf && privkey_buf, PJ_EINVAL);
+    PJ_ASSERT_RETURN(pool && p_cert &&
+                     (CA_buf || cert_buf || privkey_buf),
+                     PJ_EINVAL);
 
-    cert = PJ_POOL_ZALLOC_T(pool, pj_ssl_cert_t);
-    pj_strdup(pool, &cert->CA_buf, CA_buf);
-    pj_strdup(pool, &cert->cert_buf, cert_buf);
-    pj_strdup(pool, &cert->privkey_buf, privkey_buf);
-    pj_strdup_with_null(pool, &cert->privkey_pass, privkey_pass);
+    cert = *p_cert;
+    if (!cert)
+        cert = PJ_POOL_ZALLOC_T(pool, pj_ssl_cert_t);
+    if (!cert)
+        return PJ_ENOMEM;
+
+    if (CA_buf) {
+        pj_strdup(pool, &cert->CA_buf, CA_buf);
+    }
+    if (cert_buf) {
+        pj_strdup(pool, &cert->cert_buf, cert_buf);
+    }
+    if (privkey_buf) {
+        pj_strdup(pool, &cert->privkey_buf, privkey_buf);
+    }
+    if (privkey_pass) {
+        pj_strdup_with_null(pool, &cert->privkey_pass, privkey_pass);
+    }
 
     *p_cert = cert;
 
@@ -2384,9 +2438,14 @@ PJ_DEF(pj_status_t) pj_ssl_cert_load_from_store(
 #if (PJ_SSL_SOCK_IMP == PJ_SSL_SOCK_IMP_SCHANNEL)
     pj_ssl_cert_t *cert;
 
-    PJ_ASSERT_RETURN(pool && criteria && p_cert, PJ_EINVAL);
+    PJ_ASSERT_RETURN(pool && p_cert && criteria, PJ_EINVAL);
 
-    cert = PJ_POOL_ZALLOC_T(pool, pj_ssl_cert_t);
+    cert = *p_cert;
+    if (!cert)
+        cert = PJ_POOL_ZALLOC_T(pool, pj_ssl_cert_t);
+    if (!cert)
+        return PJ_ENOMEM;
+
     pj_memcpy(&cert->criteria, criteria, sizeof(*criteria));
     pj_strdup_with_null(pool, &cert->criteria.keyword, &criteria->keyword);
 
@@ -2396,6 +2455,36 @@ PJ_DEF(pj_status_t) pj_ssl_cert_load_from_store(
 #else
     PJ_UNUSED_ARG(pool);
     PJ_UNUSED_ARG(criteria);
+    PJ_UNUSED_ARG(p_cert);
+    return PJ_ENOTSUP;
+#endif
+}
+
+
+PJ_DEF(pj_status_t) pj_ssl_cert_load_direct(
+                                pj_pool_t *pool,
+                                pj_ssl_cert_direct *cert_direct,
+                                pj_ssl_cert_t **p_cert)
+{
+#if (PJ_SSL_SOCK_IMP == PJ_SSL_SOCK_IMP_OPENSSL)
+    pj_ssl_cert_t *cert;
+
+    PJ_ASSERT_RETURN(pool && p_cert && cert_direct, PJ_EINVAL);
+
+    cert = *p_cert;
+    if (!cert)
+        cert = PJ_POOL_ZALLOC_T(pool, pj_ssl_cert_t);
+    if (!cert)
+        return PJ_ENOMEM;
+
+    cert->direct = *cert_direct;
+
+    *p_cert = cert;
+
+    return PJ_SUCCESS;
+#else
+    PJ_UNUSED_ARG(pool);
+    PJ_UNUSED_ARG(cert_direct);
     PJ_UNUSED_ARG(p_cert);
     return PJ_ENOTSUP;
 #endif
@@ -2425,6 +2514,23 @@ PJ_DEF(pj_status_t) pj_ssl_sock_set_certificate(
     pj_strdup(pool, &cert_->CA_buf, &cert->CA_buf);
     pj_strdup(pool, &cert_->cert_buf, &cert->cert_buf);
     pj_strdup(pool, &cert_->privkey_buf, &cert->privkey_buf);
+
+    /* For OpenSSL version >= 3.0, add ref EVP_PKEY & X509 */
+#   if (PJ_SSL_SOCK_IMP == PJ_SSL_SOCK_IMP_OPENSSL) && \
+       (OPENSSL_VERSION_NUMBER >= 0x30000000L)
+    if ((cert_->direct.type & PJ_SSL_CERT_DIRECT_OPENSSL_EVP_PKEY) &&
+        cert_->direct.privkey)
+    {
+        EVP_PKEY_up_ref(cert_->direct.privkey);
+    }
+
+    if ((cert_->direct.type & PJ_SSL_CERT_DIRECT_OPENSSL_X509_CERT) &&
+        cert_->direct.cert)
+    {
+        X509_up_ref(cert_->direct.cert);
+    }
+#   endif
+
 #else
     pj_strdup_with_null(pool, &cert_->criteria.keyword,
                         &cert->criteria.keyword);

@@ -644,13 +644,61 @@ PJ_DEF(pj_bool_t) pjsip_tx_data_is_valid( pjsip_tx_data *tdata )
 static char *get_msg_info(pj_pool_t *pool, const char *obj_name,
                           const pjsip_msg *msg)
 {
+#if PJSIP_MSG_INFO_HAS_EXTRA_DETAILS
+    char info_buf[256], *info;
+    const pjsip_cid_hdr *call_id;
+    const pjsip_to_hdr *to_hdr;
+    char to_buf[64];
+#else
     char info_buf[128], *info;
+#endif
     const pjsip_cseq_hdr *cseq;
     int len;
 
     cseq = (const pjsip_cseq_hdr*) pjsip_msg_find_hdr(msg, PJSIP_H_CSEQ, NULL);
     PJ_ASSERT_RETURN(cseq != NULL, "INVALID MSG");
 
+#if PJSIP_MSG_INFO_HAS_EXTRA_DETAILS
+    /* Get additional headers for extra details */
+    
+    call_id = (const pjsip_cid_hdr*) pjsip_msg_find_hdr(msg, PJSIP_H_CALL_ID, NULL);
+    to_hdr = (const pjsip_to_hdr*) pjsip_msg_find_hdr(msg, PJSIP_H_TO, NULL);
+
+    /* Extract To header URI as string */
+    if (to_hdr && to_hdr->uri) {
+        int to_len = pjsip_uri_print(PJSIP_URI_IN_FROMTO_HDR, to_hdr->uri, to_buf, sizeof(to_buf) - 1);
+        if (to_len > 0 && to_len < (int)sizeof(to_buf)) {
+            to_buf[to_len] = '\0';
+        } else {
+            pj_ansi_strcpy(to_buf, "...");
+        }
+    } else {
+        pj_ansi_strcpy(to_buf, "N/A");
+    }
+
+    if (msg->type == PJSIP_REQUEST_MSG) {
+        len = pj_ansi_snprintf(info_buf, sizeof(info_buf), 
+                               "Request msg %.*s/cseq=%d/call-id=%.*s/to=%s (%s)",
+                               (int)msg->line.req.method.name.slen,
+                               msg->line.req.method.name.ptr,
+                               cseq->cseq,
+                               call_id ? (int)call_id->id.slen : 3, 
+                               call_id ? call_id->id.ptr : "N/A",
+                               to_buf,
+                               obj_name);
+    } else {
+        len = pj_ansi_snprintf(info_buf, sizeof(info_buf),
+                               "Response msg %d/%.*s/cseq=%d/call-id=%.*s/to=%s (%s)",
+                               msg->line.status.code,
+                               (int)cseq->method.name.slen,
+                               cseq->method.name.ptr,
+                               cseq->cseq,
+                               call_id ? (int)call_id->id.slen : 3, 
+                               call_id ? call_id->id.ptr : "N/A",
+                               to_buf,
+                               obj_name);
+    }
+#else
     if (msg->type == PJSIP_REQUEST_MSG) {
         len = pj_ansi_snprintf(info_buf, sizeof(info_buf), 
                                "Request msg %.*s/cseq=%d (%s)",
@@ -665,6 +713,7 @@ static char *get_msg_info(pj_pool_t *pool, const char *obj_name,
                                cseq->method.name.ptr,
                                cseq->cseq, obj_name);
     }
+#endif
 
     if (len < 1 || len >= (int)sizeof(info_buf)) {
         return "MSG TOO LONG";
@@ -1466,11 +1515,14 @@ PJ_DEF(pj_status_t) pjsip_transport_shutdown2(pjsip_transport *tp,
     pj_lock_acquire(tp->lock);
 
     mgr = tp->tpmgr;
-    pj_lock_acquire(mgr->lock);
+
+    // Acquiring manager lock after transport lock may cause deadlock.
+    // And it does not seem necessary as well.
+    //pj_lock_acquire(mgr->lock);
 
     /* Do nothing if transport is being shutdown/destroyed already */
     if (tp->is_shutdown || tp->is_destroying) {
-        pj_lock_release(mgr->lock);
+        //pj_lock_release(mgr->lock);
         pj_lock_release(tp->lock);
         return PJ_SUCCESS;
     }
@@ -1485,7 +1537,7 @@ PJ_DEF(pj_status_t) pjsip_transport_shutdown2(pjsip_transport *tp,
         tp->is_shutdown = PJ_TRUE;
 
     /* Notify application of transport shutdown */
-    state_cb = pjsip_tpmgr_get_state_cb(tp->tpmgr);
+    state_cb = pjsip_tpmgr_get_state_cb(mgr);
     if (state_cb) {
         pjsip_transport_state_info state_info;
 
@@ -1501,7 +1553,7 @@ PJ_DEF(pj_status_t) pjsip_transport_shutdown2(pjsip_transport *tp,
         pjsip_transport_dec_ref(tp);
     }
 
-    pj_lock_release(mgr->lock);
+    //pj_lock_release(mgr->lock);
     pj_lock_release(tp->lock);
 
     return status;
@@ -1908,6 +1960,12 @@ PJ_DEF(pj_status_t) pjsip_tpmgr_find_local_addr( pjsip_tpmgr *tpmgr,
  */
 PJ_DEF(unsigned) pjsip_tpmgr_get_transport_count(pjsip_tpmgr *mgr)
 {
+    return pjsip_tpmgr_get_transport_count_by_type(mgr, -1);
+}
+
+PJ_DEF(unsigned) pjsip_tpmgr_get_transport_count_by_type(pjsip_tpmgr *mgr,
+                                                         int type)
+{
     pj_hash_iterator_t itr_val;
     pj_hash_iterator_t *itr;
     int nr_of_transports = 0;
@@ -1917,7 +1975,15 @@ PJ_DEF(unsigned) pjsip_tpmgr_get_transport_count(pjsip_tpmgr *mgr)
     itr = pj_hash_first(mgr->table, &itr_val);
     while (itr) {
         transport *tp_entry = (transport *)pj_hash_this(mgr->table, itr);
-        nr_of_transports += (int)pj_list_size(tp_entry);
+        if (type<0) {
+            nr_of_transports += (int)pj_list_size(tp_entry);
+        } else {
+            transport *node = tp_entry->next;
+            for (; node!=tp_entry; node=node->next) {
+                if (tp_entry->tp->key.type==type)
+                    ++nr_of_transports;
+            }
+        }
         itr = pj_hash_next(mgr->table, itr);
     }
 

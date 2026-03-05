@@ -140,7 +140,8 @@ AudioMediaTransmitParam::AudioMediaTransmitParam()
 }
 
 AudioMedia::AudioMedia() 
-: Media(PJMEDIA_TYPE_AUDIO), id(PJSUA_INVALID_ID), mediaPool(NULL)
+: Media(PJMEDIA_TYPE_AUDIO), id(PJSUA_INVALID_ID), mediaCachingPool({{{0}}}),
+  mediaPool(NULL)
 {
 }
 
@@ -749,7 +750,7 @@ ToneDigitMapVector ToneGenerator::getDigitMap() const PJSUA2_THROW(Error)
         d.freq1 = pdm->digits[i].freq1;
         d.freq2 = pdm->digits[i].freq2;
 
-        tdm.push_back(d);
+        tdm.push_back(PJSUA2_MOVE(d));
     }
 
     return tdm;
@@ -796,7 +797,7 @@ void AudioDevInfo::fromPj(const pjmedia_aud_dev_info &dev_info)
         MediaFormatAudio format;
         format.fromPj(dev_info.ext_fmt[i]);
         if (format.type == PJMEDIA_TYPE_AUDIO)
-            extFmt.push_back(format);
+            extFmt.push_back(PJSUA2_MOVE(format));
     }
 }
 
@@ -946,7 +947,7 @@ AudioDevInfoVector2 AudDevManager::enumDev2() const PJSUA2_THROW(Error)
     for (unsigned i = 0; i<count ;++i) {
         AudioDevInfo di;
         di.fromPj(pj_info[i]);
-        adiv2.push_back(di);
+        adiv2.push_back(PJSUA2_MOVE(di));
     }
 
     return adiv2;
@@ -1677,7 +1678,7 @@ void VideoDevInfo::fromPj(const pjmedia_vid_dev_info &dev_info)
         MediaFormatVideo format;
         format.fromPj(dev_info.fmt[i]);
         if (format.type == PJMEDIA_TYPE_VIDEO)
-            fmt.push_back(format);
+            fmt.push_back(PJSUA2_MOVE(format));
     }
 #else
     PJ_UNUSED_ARG(dev_info);
@@ -1765,7 +1766,7 @@ VideoDevInfoVector2 VidDevManager::enumDev2() const PJSUA2_THROW(Error)
     for (unsigned i = 0; i<count;++i) {
         VideoDevInfo vdi;
         vdi.fromPj(pj_info[i]);
-        vdiv2.push_back(vdi);
+        vdiv2.push_back(PJSUA2_MOVE(vdi));
     }
 #endif
     return vdiv2;
@@ -1961,6 +1962,206 @@ VidDevManager::~VidDevManager()
     clearVideoDevList();
 #endif
 }
+///////////////////////////////////////////////////////////////////////////////
+VideoPlayer::VideoPlayer()
+: playerId(PJSUA_INVALID_ID)
+{
+#if !PJSUA_HAS_VIDEO
+    PJ_UNUSED_ARG(playerId);
+#endif
+}
+
+VideoPlayer::~VideoPlayer()
+{
+#if PJSUA_HAS_VIDEO
+    if (playerId != PJSUA_INVALID_ID) {
+        pjsua_avi_player_destroy(playerId);
+    }
+#endif
+}
+
+void VideoPlayer::createVideoPlayer(const string& file_name) PJSUA2_THROW(Error)
+{
+#if PJSUA_HAS_VIDEO
+    if (playerId != PJSUA_INVALID_ID) {
+        PJSUA2_RAISE_ERROR(PJ_EEXISTS);
+    }
+    pj_str_t pj_name = str2Pj(file_name);
+
+    PJSUA2_CHECK_EXPR(pjsua_avi_player_create(&pj_name, &playerId));
+#else
+    PJ_UNUSED_ARG(file_name);
+    PJSUA2_RAISE_ERROR(PJ_EINVALIDOP);
+#endif
+}
+
+AudioMediaVector2 VideoPlayer::mediaEnumPorts() PJSUA2_THROW(Error)
+{
+#if PJSUA_HAS_VIDEO
+    AudioMediaVector2 amv2;
+    unsigned i, count;
+
+    count = pjsua_avi_player_get_num_stream(playerId, PJMEDIA_TYPE_AUDIO);
+
+    for (i = 0; i < count; ++i) {
+        AudioMediaHelper am;
+
+        pjsua_conf_port_id port_id = pjsua_avi_player_get_conf_port(playerId,
+                                                         PJMEDIA_TYPE_AUDIO, i);
+        if (port_id == PJSUA_INVALID_ID)
+            continue;
+
+        am.setPortId(port_id);
+        amv2.push_back(am);
+    }
+    if (amv2.size() == 0)
+        PJSUA2_RAISE_ERROR(PJ_ENOTFOUND);
+
+    return amv2;
+#else
+    PJSUA2_RAISE_ERROR(PJ_EINVALIDOP);
+#endif
+}
+
+VideoMediaVector VideoPlayer::mediaEnumVidPorts() PJSUA2_THROW(Error)
+{
+#if PJSUA_HAS_VIDEO
+    VideoMediaVector vmv;
+    unsigned i, count;
+
+    count = pjsua_avi_player_get_num_stream(playerId, PJMEDIA_TYPE_VIDEO);
+
+    for (i = 0; i < count; ++i) {
+        VideoMediaHelper vm;
+
+        pjsua_conf_port_id port_id = pjsua_avi_player_get_conf_port(playerId,
+                                                         PJMEDIA_TYPE_VIDEO, i);
+        if (port_id == PJSUA_INVALID_ID)
+            continue;
+
+        vm.setPortId(port_id);
+        vmv.push_back(vm);
+    }
+    if (vmv.size() == 0)
+        PJSUA2_RAISE_ERROR(PJ_ENOTFOUND);
+
+    return vmv;
+
+#else
+    PJSUA2_RAISE_ERROR(PJ_EINVALIDOP);
+#endif
+}
+
+int VideoPlayer::getVideoDevId() PJSUA2_THROW(Error)
+{
+#if PJSUA_HAS_VIDEO
+    pjmedia_vid_dev_index vid_idx = pjsua_avi_player_get_vid_dev(playerId);
+    if (vid_idx == PJMEDIA_VID_INVALID_DEV)
+        PJSUA2_RAISE_ERROR(PJ_ENOTFOUND);
+
+    return vid_idx;
+#else
+    PJSUA2_RAISE_ERROR(PJ_EINVALIDOP);
+#endif
+}
+
+///////////////////////////////////////////////////////////////////////////////
+VideoRecorder::VideoRecorder()
+: recorderId(PJSUA_INVALID_ID)
+{
+
+}
+
+VideoRecorder::~VideoRecorder()
+{
+#if PJSUA_HAS_VIDEO
+    if (recorderId != PJSUA_INVALID_ID) {
+        pjsua_avi_recorder_destroy(recorderId);
+    }
+#endif
+}
+
+void VideoRecorder::createVideoRecorder(const string& file_name,
+                                        long max_size,
+                                        MediaFormatVideo *vid_fmt,
+                                        MediaFormatAudio *aud_fmt,
+                                        unsigned options) PJSUA2_THROW(Error)
+{
+#if PJSUA_HAS_VIDEO
+    if (recorderId != PJSUA_INVALID_ID) {
+        PJSUA2_RAISE_ERROR(PJ_EEXISTS);
+    }
+    pjmedia_format vidfmt;
+    pjmedia_format audfmt;
+
+    pj_str_t pj_name = str2Pj(file_name);
+    if (vid_fmt)
+        vidfmt = vid_fmt->toPj();
+    if (aud_fmt)
+        audfmt = aud_fmt->toPj();
+
+    PJSUA2_CHECK_EXPR(pjsua_avi_recorder_create(&pj_name, 
+                                                max_size,
+                                                vid_fmt?&vidfmt:NULL,
+                                                aud_fmt?&audfmt:NULL,
+                                                options, 
+                                                &recorderId));
+
+    pjsua_avi_recorder_set_cb(recorderId, this, &max_size_cb);
+#else
+    PJ_UNUSED_ARG(file_name);
+    PJ_UNUSED_ARG(max_size);
+    PJ_UNUSED_ARG(vid_fmt);
+    PJ_UNUSED_ARG(aud_fmt);
+    PJ_UNUSED_ARG(options);
+    PJ_UNUSED_ARG(recorderId);
+    PJSUA2_RAISE_ERROR(PJ_EINVALIDOP);
+#endif
+}
+
+VideoMedia VideoRecorder::getVideoMedia() PJSUA2_THROW(Error)
+{
+#if PJSUA_HAS_VIDEO
+    pjsua_conf_port_id port_id = pjsua_avi_recorder_get_conf_port(recorderId,
+                                                            PJMEDIA_TYPE_VIDEO);
+
+    if (port_id == PJSUA_INVALID_ID)
+        PJSUA2_RAISE_ERROR(PJ_ENOTFOUND);
+
+    VideoMediaHelper vm;
+    vm.setPortId(port_id);
+
+    return vm;
+#else
+    PJSUA2_RAISE_ERROR(PJ_EINVALIDOP);
+#endif
+}
+
+AudioMedia VideoRecorder::getAudioMedia() PJSUA2_THROW(Error)
+{
+#if PJSUA_HAS_VIDEO
+    pjsua_conf_port_id port_id = pjsua_avi_recorder_get_conf_port(recorderId,
+                                                            PJMEDIA_TYPE_AUDIO);
+
+    if (port_id == PJSUA_INVALID_ID)
+        PJSUA2_RAISE_ERROR(PJ_ENOTFOUND);
+
+    AudioMediaHelper vm;
+    vm.setPortId(port_id);
+
+    return vm;
+#else
+    PJSUA2_RAISE_ERROR(PJ_EINVALIDOP);
+#endif
+}
+
+void VideoRecorder::max_size_cb(pjsua_recorder_id id, void *usr_data)
+{
+    PJ_UNUSED_ARG(id);
+
+    VideoRecorder *vid_rec = (VideoRecorder*)usr_data;
+    vid_rec->onMaxSize();
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -1979,7 +2180,7 @@ public:
             fmtp.name = pj2Str(in_fmtp.param[i].name);
             fmtp.val = pj2Str(in_fmtp.param[i].val);
         
-            out_fmtp.push_back(fmtp);
+            out_fmtp.push_back(PJSUA2_MOVE(fmtp));
        }
     }
 

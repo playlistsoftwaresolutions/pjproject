@@ -80,7 +80,7 @@ export PJSIP_LDFLAGS += $(PJLIB_UTIL_LDLIB) \
 export PJSIP_UA_SRCDIR = ../src/pjsip-ua
 export PJSIP_UA_OBJS += $(OS_OBJS) $(M_OBJS) $(CC_OBJS) $(HOST_OBJS) \
 			sip_inv.o sip_reg.o sip_replaces.o sip_xfer.o \
-			sip_100rel.o sip_timer.o
+			sip_100rel.o sip_timer.o sip_siprec.o
 export PJSIP_UA_CFLAGS += $(_CFLAGS)
 export PJSIP_UA_CXXFLAGS += $(_CXXFLAGS)
 export PJSIP_UA_LDFLAGS += $(PJSIP_SIMPLE_LDLIB) \
@@ -114,7 +114,7 @@ export PJSUA_LIB_SRCDIR = ../src/pjsua-lib
 export PJSUA_LIB_OBJS += $(OS_OBJS) $(M_OBJS) $(CC_OBJS) $(HOST_OBJS) \
 			pjsua_acc.o pjsua_call.o pjsua_core.o \
 			pjsua_im.o pjsua_media.o pjsua_pres.o \
-			pjsua_dump.o pjsua_aud.o pjsua_vid.o
+			pjsua_dump.o pjsua_aud.o pjsua_txt.o pjsua_vid.o
 export PJSUA_LIB_CFLAGS += $(_CFLAGS) $(PJ_VIDEO_CFLAGS)
 export PJSUA_LIB_CXXFLAGS += $(_CXXFLAGS) $(PJ_VIDEO_CFLAGS)
 export PJSUA_LIB_LDFLAGS += $(PJSIP_UA_LDLIB) \
@@ -161,7 +161,7 @@ export PJSUA2_LIB_LDFLAGS += $(PJSUA_LIB_LDLIB) \
 #
 export PJSUA2_TEST_SRCDIR = ../src/pjsua2-test
 export PJSUA2_TEST_OBJS += $(OS_OBJS) $(M_OBJS) $(CC_OBJS) $(HOST_OBJS) \
-			   main.o
+			   main.o instant_messaging.o
 export PJSUA2_TEST_CFLAGS += $(_CFLAGS) $(PJ_VIDEO_CFLAGS)
 export PJSUA2_TEST_CXXFLAGS = $(_CXXFLAGS) $(PJSUA2_LIB_CFLAGS) $(PJ_VIDEO_CFLAGS)
 export PJSUA2_TEST_LDFLAGS += $(PJ_LDXXFLAGS) $(PJ_LDXXLIBS) $(LDFLAGS)
@@ -169,7 +169,6 @@ ifeq ($(EXCLUDE_APP),0)
 export PJSUA2_TEST_EXE := pjsua2-test-$(TARGET_NAME)$(HOST_EXE)
 endif
 export CC_OUT CC AR RANLIB HOST_MV HOST_RM HOST_RMDIR HOST_MKDIR OBJEXT LD LDOUT 
-
 
 ###############################################################################
 # Defines for building test application
@@ -192,8 +191,8 @@ export TEST_LDFLAGS += $(PJSIP_LDLIB) \
 		       $(PJMEDIA_VIDEODEV_LDLIB) \
 		       $(PJMEDIA_LDLIB) \
 		       $(PJMEDIA_AUDIODEV_LDLIB) \
-		       $(PJLIB_UTIL_LDLIB) \
 		       $(PJNATH_LDLIB) \
+		       $(PJLIB_UTIL_LDLIB) \
 		       $(PJLIB_LDLIB) \
 		       $(_LDFLAGS)
 ifeq ($(EXCLUDE_APP),0)

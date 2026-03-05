@@ -203,6 +203,33 @@ PJ_DECL(pj_status_t) pj_thread_create(  pj_pool_t *pool,
                                         pj_thread_t **thread );
 
 /**
+ * Create a new thread, use preallocated space for thread descriptor
+ * and thread stack.
+ * To avoid pool allocation, function does not support suspended thread.
+ * 
+ *
+ * @param thread_name   The optional name to be assigned to the thread.
+ * @param proc          Thread entry function.
+ * @param arg           Argument to be passed to the thread entry function.
+ * @param stack_size    The size of the stack for the new thread, or ZERO or
+ *                      PJ_THREAD_DEFAULT_STACK_SIZE to let the 
+ *                      library choose the reasonable size for the stack. 
+ * @param stack_addr    Preallocated space of size stack_size for the stack
+ *                      for the new thread, used if PJ_THREAD_ALLOCATE_STACK
+ *                      macro defined and is not 0. Otherwise ignored.
+ * @param thread        Pointer to preallocated thread descriptor to hold
+ *                      the newly created thread.
+ *
+ * @return              PJ_SUCCESS on success, or the error code.
+ */
+PJ_DECL(pj_status_t) pj_thread_create2( const char *thread_name,
+                                        pj_thread_proc *proc, 
+                                        void *arg,
+                                        pj_size_t stack_size, 
+                                        void *stack_addr,
+                                        pj_thread_t *thread );
+
+/**
  * Register a thread that was created by external or native API to PJLIB.
  * This function must be called in the context of the thread being registered.
  * When the thread is created by external function or API call,
@@ -221,6 +248,46 @@ PJ_DECL(pj_status_t) pj_thread_create(  pj_pool_t *pool,
 PJ_DECL(pj_status_t) pj_thread_register ( const char *thread_name,
                                           pj_thread_desc desc,
                                           pj_thread_t **thread);
+
+
+/**
+ * Detach pjsip library from the current thread without terminating 
+ * the OS thread, frees the resources allocated by pjlib for the calling thread,
+ * including freeing the tls slot in which pj_thread_t is stored.
+ * However, the memory allocated for the pj_thread_t itself will only be released
+ * when the pool used to create the thread is destroyed.
+ * 
+ * An application should call this function when leaving threads created by 
+ * an external module (e.g. audio thread, threads from an external thread pool, 
+ * etc). Such a thread is registered with pj_thread_register() and detached 
+ * with pj_thread_unregister() when finished using.
+ *
+ * @return PJ_SUCCESS on success.
+ */
+PJ_DECL(pj_status_t) pj_thread_unregister();
+
+/**
+ * Register a thread that was created by external or native API to PJLIB.
+ * 
+ * This function is a complete copy of pj_thread_register(), with the only
+ * difference being that on Windows it returns a pj_thread_t suitable for
+ * waiting for the thread to terminate. This function should only be used 
+ * if the application requires calling pj_thread_join() for the current thread;
+ * otherwise, use pj_thread_register().
+ *
+ * @param thread_name   The optional name to be assigned to the thread.
+ * @param desc          Thread descriptor, which must be available throughout 
+ *                      the lifetime of the thread.
+ * @param thread        Pointer to hold the created thread handle.
+ *
+ * @return              PJ_SUCCESS on success, or the error code.
+ * 
+ * @see pj_thread_register()
+ */
+PJ_DECL(pj_status_t) pj_thread_attach ( const char *thread_name,
+                                       pj_thread_desc desc,
+                                       pj_thread_t **thread);
+
 
 /**
  * Check if this thread has been registered to PJLIB.
@@ -1092,6 +1159,108 @@ PJ_DECL(pj_status_t) pj_event_destroy(pj_event_t *event);
  * @}
  */
 #endif  /* PJ_HAS_EVENT_OBJ */
+
+
+ /* **************************************************************************/
+ /**
+  * @defgroup PJ_BARRIER_SEC Barrier sections.
+  * @ingroup PJ_OS
+  * @{
+  * This module provides abstraction to pj_barrier_t - synchronization barrier.
+  * It allows threads to block until all participating threads have reached
+  * the barrier, ensuring synchronization at specific points in execution.
+  * pj_barrier_t provides a barrier mechanism for synchronizing threads in 
+  * a multithreaded application, similar to 
+  * the POSIX pthread_barrier_wait or Windows EnterSynchronizationBarrier.
+  */
+
+/**
+ * Flags that control the behavior of the barrier.
+ * Only supported on Windows platform starting from Windows 8.
+ * Otherwise, the flags are ignored.
+ */
+enum pj_barrier_flags {
+    /**
+     * Specifies that the thread entering the barrier should block
+     * immediately until the last thread enters the barrier. 
+     */
+    PJ_BARRIER_FLAGS_BLOCK_ONLY = 1,
+
+    /**
+     * Specifies that the thread entering the barrier should spin until
+     * the last thread enters the barrier,
+     * even if the spinning thread exceeds the barrier's maximum spin count.
+     */
+    PJ_BARRIER_FLAGS_SPIN_ONLY = 2,
+
+    /**
+     * Specifies that the function can skip the work required to ensure
+     * that it is safe to delete the barrier, which can improve performance.
+     * All threads that enter this barrier must specify the flag;
+     * otherwise, the flag is ignored.
+     * This flag should be used only if the barrier will never be deleted.
+     * "Never" means "when some thread is waiting on this barrier".
+     */
+    PJ_BARRIER_FLAGS_NO_DELETE = 4
+};
+
+/**
+ * Create a barrier object.
+ * pj_barrier_create() creates a barrier object that can be used to synchronize
+ * threads. The barrier object is initialized with a thread count that
+ * specifies the number of threads that must call pj_barrier_wait()
+ * before any are allowed to proceed.
+ * 
+ * @param pool          The pool to allocate the barrier object.
+ * @param thread_count  The number of threads that must call pj_barrier_wait()
+ *                      before any are allowed to proceed.
+ * @param p_barrier     Pointer to hold the barrier object upon return.
+ *
+ * @return              PJ_SUCCESS on success, or the error code.
+ * 
+ * @warning             The behavior of the barrier is undefined if more
+ *                      threads than thread_count arrive at the barrier.
+ */
+PJ_DECL(pj_status_t) pj_barrier_create(pj_pool_t *pool, unsigned thread_count, 
+                                       pj_barrier_t **p_barrier);
+
+/**
+ * Destroy a barrier object.
+ * pj_barrier_destroy() destroys a barrier object and releases any resources
+ * associated with the barrier.
+ * 
+ * @param barrier       The barrier to destroy.
+ * 
+ * @return              PJ_SUCCESS on success, or the error code.
+ */
+PJ_DECL(pj_status_t) pj_barrier_destroy(pj_barrier_t *barrier);
+
+/** 
+ * Wait for all threads to reach the barrier.
+ * pj_barrier_wait() allows threads to block until all participating threads
+ * have reached the barrier, ensuring synchronization at specific points in
+ * execution. It provides a barrier mechanism for synchronizing threads in 
+ * a multithreaded application, similar to the POSIX pthread_barrier_wait 
+ * or Windows EnterSynchronizationBarrier.
+ * 
+ * @param barrier       The barrier to wait on.
+ * @param flags         Flags that control the behavior of the barrier
+ *                      (combination of pj_barrier_flags), default 0.
+ * 
+ * @return              Returns PJ_TRUE for a single (arbitrary) thread
+ *                      synchronized at the barrier and PJ_FALSE for each
+ *                      of the other threads. Otherwise, an error number 
+ *                      shall be returned to indicate the error.
+ *
+ * @warning             The behavior of the barrier is undefined if more
+ *                      threads arrive at the barrier than the thread_count
+ *                      specified when the barrier was created.
+ */
+PJ_DECL(pj_int32_t) pj_barrier_wait(pj_barrier_t *barrier, pj_uint32_t flags);
+
+  /**
+  * @}
+  */
 
 /* **************************************************************************/
 /**

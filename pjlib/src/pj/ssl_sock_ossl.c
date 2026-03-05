@@ -785,7 +785,7 @@ static pj_status_t init_openssl(void)
 #if !USING_LIBRESSL && !defined(OPENSSL_NO_EC) \
     && OPENSSL_VERSION_NUMBER >= 0x1000200fL
 #if OPENSSL_VERSION_NUMBER >= 0x1010100fL
-        ssl_curves_num = EC_get_builtin_curves(NULL, 0);
+        ssl_curves_num = (unsigned)EC_get_builtin_curves(NULL, 0);
 #else
 
 #if USING_BORINGSSL
@@ -1076,7 +1076,13 @@ static int xname_cmp(const X509_NAME **a, const X509_NAME **b) {
 #if !defined(OPENSSL_NO_DH)
 
 static void set_option(const pj_ssl_sock_t* ssock, SSL_CTX* ctx) {
-    unsigned long options = SSL_OP_CIPHER_SERVER_PREFERENCE |
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L && PJ_HAS_INT64
+    uint64_t options;
+#else
+    unsigned long options;
+#endif
+
+    options = SSL_OP_CIPHER_SERVER_PREFERENCE |
 #if !defined(OPENSSL_NO_ECDH) && OPENSSL_VERSION_NUMBER >= 0x10000000L
         SSL_OP_SINGLE_ECDH_USE |
 #endif
@@ -1137,37 +1143,13 @@ static pj_status_t init_ossl_ctx(pj_ssl_sock_t *ssock)
     int rc;
     pj_status_t status;
 
-    if (ssock->param.proto == PJ_SSL_SOCK_PROTO_DEFAULT)
-        ssock->param.proto = PJ_SSL_SOCK_PROTO_SSL23;
-
-    /* Determine SSL method to use */
-    /* Specific version methods are deprecated since 1.1.0 */
-#if (USING_LIBRESSL && LIBRESSL_VERSION_NUMBER < 0x2020100fL)\
-    || OPENSSL_VERSION_NUMBER < 0x10100000L
-    switch (ssock->param.proto) {
-    case PJ_SSL_SOCK_PROTO_TLS1:
-        ssl_method = (SSL_METHOD*)TLSv1_method();
-        break;
-#ifndef OPENSSL_NO_SSL2
-    case PJ_SSL_SOCK_PROTO_SSL2:
-        ssl_method = (SSL_METHOD*)SSLv2_method();
-        break;
-#endif
-#ifndef OPENSSL_NO_SSL3_METHOD
-    case PJ_SSL_SOCK_PROTO_SSL3:
-        ssl_method = (SSL_METHOD*)SSLv3_method();
-#endif
-        break;
+    if (ssock->param.proto == PJ_SSL_SOCK_PROTO_DEFAULT) {
+        ssock->param.proto = PJ_SSL_SOCK_PROTO_TLS1_2 |
+                             PJ_SSL_SOCK_PROTO_TLS1_3;
     }
-#endif
 
     if (!ssl_method) {
-#if (USING_LIBRESSL && LIBRESSL_VERSION_NUMBER < 0x2020100fL)\
-    || OPENSSL_VERSION_NUMBER < 0x10100000L
-        ssl_method = (SSL_METHOD*)SSLv23_method();
-#else
         ssl_method = (SSL_METHOD*)TLS_method();
-#endif
 
 #ifdef SSL_OP_NO_SSLv2
         /** Check if SSLv2 is enabled */
@@ -1261,6 +1243,10 @@ static pj_status_t init_ossl_ctx(pj_ssl_sock_t *ssock)
 
     /* Apply credentials */
     if (cert) {
+        pj_bool_t CA_loaded = PJ_FALSE;
+        pj_bool_t cert_loaded = PJ_FALSE;
+        pj_bool_t privkey_loaded = PJ_FALSE;
+
         /* Load CA list if one is specified. */
         if (cert->CA_file.slen || cert->CA_path.slen) {
 
@@ -1285,6 +1271,7 @@ static pj_status_t init_ossl_ctx(pj_ssl_sock_t *ssock)
                 ossock->ossl_ctx = NULL;
                 return status;
             } else {
+                CA_loaded = PJ_TRUE;
                 PJ_LOG(4,(ssock->pool->obj_name,
                           "CA certificates loaded from '%s%s%s'",
                           cert->CA_file.ptr,
@@ -1316,6 +1303,7 @@ static pj_status_t init_ossl_ctx(pj_ssl_sock_t *ssock)
                 ossock->ossl_ctx = NULL;
                 return status;
             } else {
+                cert_loaded = PJ_TRUE;
                 PJ_LOG(4,(ssock->pool->obj_name,
                           "Certificate chain loaded from '%s'",
                           cert->cert_file.ptr));
@@ -1338,6 +1326,7 @@ static pj_status_t init_ossl_ctx(pj_ssl_sock_t *ssock)
                 ossock->ossl_ctx = NULL;
                 return status;
             } else {
+                privkey_loaded = PJ_TRUE;
                 PJ_LOG(4,(ssock->pool->obj_name,
                           "Private key loaded from '%s'",
                           cert->privkey_file.ptr));
@@ -1355,12 +1344,12 @@ static pj_status_t init_ossl_ctx(pj_ssl_sock_t *ssock)
         }
 
         /* Load from buffer. */
-        if (cert->cert_buf.slen) {
+        if (cert->cert_buf.slen && !cert_loaded) {
             BIO *cbio;
             X509 *xcert = NULL;
             
             cbio = BIO_new_mem_buf((void*)cert->cert_buf.ptr,
-                                   cert->cert_buf.slen);
+                                   (int)cert->cert_buf.slen);
             if (cbio != NULL) {
                 xcert = PEM_read_bio_X509(cbio, NULL, 0, NULL);
                 if (xcert != NULL) {
@@ -1375,6 +1364,7 @@ static pj_status_t init_ossl_ctx(pj_ssl_sock_t *ssock)
                         ossock->ossl_ctx = NULL;
                         return status;
                     } else {
+                        cert_loaded = PJ_TRUE;
                         PJ_LOG(4,(ssock->pool->obj_name,
                                   "Certificate chain loaded from buffer"));
                     }
@@ -1384,9 +1374,9 @@ static pj_status_t init_ossl_ctx(pj_ssl_sock_t *ssock)
             }       
         }
 
-        if (cert->CA_buf.slen) {
+        if (cert->CA_buf.slen && !CA_loaded) {
             BIO *cbio = BIO_new_mem_buf((void*)cert->CA_buf.ptr,
-                                        cert->CA_buf.slen);
+                                        (int)cert->CA_buf.slen);
             X509_STORE *cts = SSL_CTX_get_cert_store(ctx);
 
             if (cbio && cts) {
@@ -1414,6 +1404,7 @@ static pj_status_t init_ossl_ctx(pj_ssl_sock_t *ssock)
 #endif
                         }
                     }
+                    CA_loaded = (cnt > 0);
                     PJ_LOG(4,(ssock->pool->obj_name,
                               "CA certificates loaded from buffer (cnt=%d)",
                               cnt));
@@ -1423,12 +1414,12 @@ static pj_status_t init_ossl_ctx(pj_ssl_sock_t *ssock)
             }
         }
 
-        if (cert->privkey_buf.slen) {
+        if (cert->privkey_buf.slen && !privkey_loaded) {
             BIO *kbio;      
             EVP_PKEY *pkey = NULL;
 
             kbio = BIO_new_mem_buf((void*)cert->privkey_buf.ptr,
-                                   cert->privkey_buf.slen);
+                                   (int)cert->privkey_buf.slen);
             if (kbio != NULL) {
                 pkey = PEM_read_bio_PrivateKey(kbio, NULL, &password_cb,
                                                cert);
@@ -1444,6 +1435,7 @@ static pj_status_t init_ossl_ctx(pj_ssl_sock_t *ssock)
                         ossock->ossl_ctx = NULL;
                         return status;
                     } else {
+                        privkey_loaded = PJ_TRUE;
                         PJ_LOG(4,(ssock->pool->obj_name,
                                   "Private key loaded from buffer"));
                     }
@@ -1459,7 +1451,44 @@ static pj_status_t init_ossl_ctx(pj_ssl_sock_t *ssock)
                 BIO_free(kbio);
             }       
         }
+
+        if ((cert->direct.type & PJ_SSL_CERT_DIRECT_OPENSSL_EVP_PKEY) &&
+             cert->direct.privkey && !privkey_loaded)
+        {
+            EVP_PKEY *pkey = (EVP_PKEY*)cert->direct.privkey;
+            rc = SSL_CTX_use_PrivateKey(ctx, pkey);
+            if (rc != 1) {
+                status = GET_SSL_STATUS(ssock);
+                PJ_PERROR(1,(ssock->pool->obj_name, status,
+                             "Error setting direct private key"));
+                SSL_CTX_free(ctx);
+                ossock->ossl_ctx = NULL;
+                return status;
+            } else {
+                privkey_loaded = PJ_TRUE;
+                PJ_LOG(4,(ssock->pool->obj_name, "Direct private key set"));
+            }
+        }
+
+        if ((cert->direct.type & PJ_SSL_CERT_DIRECT_OPENSSL_X509_CERT) &&
+             cert->direct.cert && !cert_loaded)
+        {
+            X509 *xcert = (X509*)cert->direct.cert;
+            rc = SSL_CTX_use_certificate(ctx, xcert);
+            if (rc != 1) {
+                status = GET_SSL_STATUS(ssock);
+                PJ_PERROR(1,(ssock->pool->obj_name, status,
+                             "Error setting direct certificate"));
+                SSL_CTX_free(ctx);
+                ossock->ossl_ctx = NULL;
+                return status;
+            } else {
+                cert_loaded = PJ_TRUE;
+                PJ_LOG(4,(ssock->pool->obj_name, "Direct certificate set"));
+            }
+        }
     }
+
 
     if (ssock->is_server) {
         char *p = NULL;
@@ -1558,7 +1587,7 @@ static pj_status_t init_ossl_ctx(pj_ssl_sock_t *ssock)
             X509_NAME *xn = NULL;
             STACK_OF(X509_NAME) *sk = NULL;
             BIO *new_bio = BIO_new_mem_buf((void*)cert->CA_buf.ptr,
-                                           cert->CA_buf.slen);
+                                           (int)cert->CA_buf.slen);
 
             sk = sk_X509_NAME_new(xname_cmp);
 
@@ -1597,7 +1626,7 @@ static pj_status_t init_ossl_ctx(pj_ssl_sock_t *ssock)
             PJ_LOG(4,(ssock->pool->obj_name,
                       "CA certificates loaded from %s",
                       (cert->CA_file.slen?cert->CA_file.ptr:"buffer")));
-        } else {
+        } else if (cert->CA_file.slen > 0 || cert->CA_buf.slen > 0) {
             PJ_LOG(1,(ssock->pool->obj_name,
                       "Error reading CA certificates from %s",
                       (cert->CA_file.slen?cert->CA_file.ptr:"buffer")));
@@ -1630,8 +1659,10 @@ static pj_status_t ssl_create(pj_ssl_sock_t *ssock)
 
     set_entropy(ssock);
 
-    if (ssock->param.proto == PJ_SSL_SOCK_PROTO_DEFAULT)
-        ssock->param.proto = PJ_SSL_SOCK_PROTO_SSL23;
+    if (ssock->param.proto == PJ_SSL_SOCK_PROTO_DEFAULT) {
+        ssock->param.proto = PJ_SSL_SOCK_PROTO_TLS1_2 |
+                             PJ_SSL_SOCK_PROTO_TLS1_3;
+    }
 
     /* Create SSL context */
     if (SERVER_SUPPORT_SESSION_REUSE && ssock->is_server) {
@@ -1693,6 +1724,23 @@ static pj_status_t ssl_create(pj_ssl_sock_t *ssock)
 static void ssl_destroy(pj_ssl_sock_t *ssock)
 {
     ossl_sock_t *ossock = (ossl_sock_t *)ssock;
+
+    /* For OpenSSL version >= 3.0, dec ref EVP_PKEY & X509 */
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+    if (ssock->cert && ssock->cert->direct.privkey &&
+        (ssock->cert->direct.type & PJ_SSL_CERT_DIRECT_OPENSSL_EVP_PKEY))
+    {
+        EVP_PKEY_free(ssock->cert->direct.privkey);
+        ssock->cert->direct.privkey = NULL;
+    }
+
+    if (ssock->cert && ssock->cert->direct.cert &&
+        (ssock->cert->direct.type & PJ_SSL_CERT_DIRECT_OPENSSL_X509_CERT))
+    {
+        X509_free(ssock->cert->direct.cert);
+        ssock->cert->direct.cert = NULL;
+    }
+#endif
 
     /* Destroy SSL instance */
     if (ossock->ossl_ssl) {
@@ -1809,7 +1857,7 @@ static pj_status_t set_cipher_list(pj_ssl_sock_t *ssock)
     enum { BUF_SIZE = 8192 };
     pj_str_t cipher_list;
     unsigned i, j;
-    int ret;
+    int ret, ret2 = 1;
 
     if (ssock->param.ciphers_num == 0) {
         ret = SSL_CTX_set_cipher_list(ossock->ossl_ctx, PJ_SSL_SOCK_OSSL_CIPHERS);
@@ -1859,9 +1907,17 @@ static pj_status_t set_cipher_list(pj_ssl_sock_t *ssock)
     /* Put NULL termination in the generated cipher list */
     cipher_list.ptr[cipher_list.slen] = '\0';
 
-    /* Finally, set chosen cipher list */
+    /* Finally, set chosen cipher list.
+     * SSL_CTX_set_cipher_list() is for TLSv1.2 and below, while
+     * SSL_CTX_set_ciphersuites() is for TLSv1.3.
+     */
     ret = SSL_CTX_set_cipher_list(ossock->ossl_ctx, buf);
-    if (ret < 1) {
+#if !USING_BORINGSSL
+    ret2 = SSL_CTX_set_ciphersuites(ossock->ossl_ctx, buf);
+#endif
+    if (ret < 1 && ret2 < 1) {
+        PJ_LOG(4, (THIS_FILE, "Failed setting cipher list %s",
+                              cipher_list.ptr));
         pj_pool_release(tmp_pool);
         return GET_SSL_STATUS(ssock);
     }
@@ -2476,7 +2532,9 @@ static pj_status_t ssl_read(pj_ssl_sock_t *ssock, void *data, int *size)
         /* SSL might just return SSL_ERROR_WANT_READ in 
          * re-negotiation.
          */
-        if (err != SSL_ERROR_NONE && err != SSL_ERROR_WANT_READ) {
+        if (err != SSL_ERROR_NONE && err != SSL_ERROR_WANT_READ &&
+            err != SSL_ERROR_ZERO_RETURN)
+        {
             if (err == SSL_ERROR_SYSCALL && size_ == -1 &&
                 ERR_peek_error() == 0 && errno == 0)
             {
@@ -2499,9 +2557,11 @@ static pj_status_t ssl_read(pj_ssl_sock_t *ssock, void *data, int *size)
             }
         }
         
-        pj_lock_release(ssock->write_mutex);
-        /* Need renegotiation */
-        return PJ_EEOF;
+        /* Return PJ_ETRYAGAIN when SSL needs renegotiation */
+        if (!SSL_is_init_finished(ossock->ossl_ssl)) {
+            pj_lock_release(ssock->write_mutex);
+            return PJ_ETRYAGAIN;
+        }
     }
 
     pj_lock_release(ssock->write_mutex);
@@ -2528,11 +2588,11 @@ static pj_status_t ssl_write(pj_ssl_sock_t *ssock, const void *data,
         int err;
         err = SSL_get_error(ossock->ossl_ssl, *nwritten);
         if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_NONE) {
-            status = PJ_EEOF;
+            status = PJ_ETRYAGAIN;
         } else {
-            /* Some problem occured */
+            /* Some problem occurred */
             status = STATUS_FROM_SSL_ERR2("Write", ssock, *nwritten,
-                                          err, size);
+                                          err, (int)size);
         }
     } else if (*nwritten < size) {
         /* nwritten < size, shouldn't happen, unless write BIO cannot hold 

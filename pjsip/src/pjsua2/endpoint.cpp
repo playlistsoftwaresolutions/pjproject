@@ -16,7 +16,6 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
  */
 #include <pjsua2/endpoint.hpp>
-#include <pjsua2/account.hpp>
 #include <pjsua2/call.hpp>
 #include <pjsua2/presence.hpp>
 #include <algorithm>
@@ -130,7 +129,7 @@ void SslCertInfo::fromPj(const pj_ssl_cert_info &info)
         SslCertName cname;
         cname.type = info.subj_alt_name.entry[i].type;
         cname.name = pj2Str(info.subj_alt_name.entry[i].name);
-        subjectAltName.push_back(cname);
+        subjectAltName.push_back(PJSUA2_MOVE(cname));
     }
 }
 
@@ -241,6 +240,61 @@ void IpChangeParam::fromPj(const pjsua_ip_change_param &param)
     restartListener = PJ2BOOL(param.restart_listener);
     restartLisDelay = param.restart_lis_delay;
     shutdownTransport = PJ2BOOL(param.shutdown_transport);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+void OnAudioMediaOpCompletedParam::fromPj(const pjmedia_conf_op_info &info)
+{
+    opType = info.op_type;
+    status = info.status;
+    switch (opType) {
+    case PJMEDIA_CONF_OP_ADD_PORT:
+        opParam.addInfo.mediaId = info.op_param.add_port.port;
+        break;
+    case PJMEDIA_CONF_OP_REMOVE_PORT:
+        opParam.removeInfo.mediaId = info.op_param.remove_port.port;
+        break;
+    case PJMEDIA_CONF_OP_CONNECT_PORTS:
+        opParam.connectInfo.mediaId = info.op_param.connect_ports.src;
+        opParam.connectInfo.targetMediaId = info.op_param.connect_ports.sink;
+        opParam.connectInfo.adjLevel = info.op_param.connect_ports.adj_level;
+        break;
+    case PJMEDIA_CONF_OP_DISCONNECT_PORTS:
+        opParam.disconnectInfo.mediaId = info.op_param.disconnect_ports.src;
+        opParam.disconnectInfo.targetMediaId = 
+                                         info.op_param.disconnect_ports.sink;
+        break;
+    default:
+        break;
+    }
+}
+
+void OnVideoMediaOpCompletedParam::fromPj(const pjmedia_vid_conf_op_info &info)
+{
+    opType = info.op_type;
+    status = info.status;
+    switch (opType) {
+    case PJMEDIA_VID_CONF_OP_ADD_PORT:
+        opParam.addInfo.mediaId = info.op_param.add_port.port;
+        break;
+    case PJMEDIA_VID_CONF_OP_REMOVE_PORT:
+        opParam.removeInfo.mediaId = info.op_param.remove_port.port;
+        break;
+    case PJMEDIA_VID_CONF_OP_CONNECT_PORTS:
+        opParam.connectInfo.mediaId = info.op_param.connect_ports.src;
+        opParam.connectInfo.targetMediaId = info.op_param.connect_ports.sink;
+        break;
+    case PJMEDIA_VID_CONF_OP_DISCONNECT_PORTS:
+        opParam.disconnectInfo.mediaId = info.op_param.disconnect_ports.src;
+        opParam.disconnectInfo.targetMediaId =
+                                         info.op_param.disconnect_ports.sink;
+        break;
+    case PJMEDIA_VID_CONF_OP_UPDATE_PORT:
+        opParam.updateInfo.mediaId = info.op_param.update_port.port;
+        break;
+    default:
+        break;
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -437,6 +491,7 @@ void MediaConfig::fromPj(const pjsua_media_config &mc)
     this->channelCount = mc.channel_count;
     this->audioFramePtime = mc.audio_frame_ptime;
     this->maxMediaPorts = mc.max_media_ports;
+    this->confThreads = mc.conf_threads;
     this->hasIoqueue = PJ2BOOL(mc.has_ioqueue);
     this->threadCnt = mc.thread_cnt;
     this->quality = mc.quality;
@@ -470,6 +525,7 @@ pjsua_media_config MediaConfig::toPj() const
     mcfg.channel_count = this->channelCount;
     mcfg.audio_frame_ptime = this->audioFramePtime;
     mcfg.max_media_ports = this->maxMediaPorts;
+    mcfg.conf_threads = this->confThreads;
     mcfg.has_ioqueue = this->hasIoqueue;
     mcfg.thread_cnt = this->threadCnt;
     mcfg.quality = this->quality;
@@ -502,6 +558,7 @@ void MediaConfig::readObject(const ContainerNode &node) PJSUA2_THROW(Error)
     NODE_READ_UNSIGNED( this_node, channelCount);
     NODE_READ_UNSIGNED( this_node, audioFramePtime);
     NODE_READ_UNSIGNED( this_node, maxMediaPorts);
+    NODE_READ_UNSIGNED( this_node, confThreads);
     NODE_READ_BOOL    ( this_node, hasIoqueue);
     NODE_READ_UNSIGNED( this_node, threadCnt);
     NODE_READ_UNSIGNED( this_node, quality);
@@ -533,6 +590,7 @@ void MediaConfig::writeObject(ContainerNode &node) const PJSUA2_THROW(Error)
     NODE_WRITE_UNSIGNED( this_node, channelCount);
     NODE_WRITE_UNSIGNED( this_node, audioFramePtime);
     NODE_WRITE_UNSIGNED( this_node, maxMediaPorts);
+    NODE_WRITE_UNSIGNED( this_node, confThreads);
     NODE_WRITE_BOOL    ( this_node, hasIoqueue);
     NODE_WRITE_UNSIGNED( this_node, threadCnt);
     NODE_WRITE_UNSIGNED( this_node, quality);
@@ -1132,6 +1190,18 @@ void Endpoint::on_buddy_state(pjsua_buddy_id buddy_id)
     buddy->onBuddyState();
 }
 
+void Endpoint::on_buddy_dlg_event_state(pjsua_buddy_id buddy_id)
+{
+    Buddy b(buddy_id);
+    Buddy *buddy = b.getOriginalInstance();
+    if (!buddy || !buddy->isValid()) {
+        /* Ignored */
+        return;
+    }
+
+    buddy->onBuddyDlgEventState();
+}
+
 void Endpoint::on_buddy_evsub_state(pjsua_buddy_id buddy_id,
                                     pjsip_evsub *sub,
                                     pjsip_event *event)
@@ -1149,6 +1219,25 @@ void Endpoint::on_buddy_evsub_state(pjsua_buddy_id buddy_id,
     prm.e.fromPj(*event);
 
     buddy->onBuddyEvSubState(prm);
+}
+
+void Endpoint::on_buddy_evsub_dlg_event_state(pjsua_buddy_id buddy_id,
+                                              pjsip_evsub *sub,
+                                              pjsip_event *event)
+{
+    PJ_UNUSED_ARG(sub);
+
+    Buddy b(buddy_id);
+    Buddy *buddy = b.getOriginalInstance();
+    if (!buddy || !buddy->isValid()) {
+        /* Ignored */
+        return;
+    }
+
+    OnBuddyEvSubStateParam prm;
+    prm.e.fromPj(*event);
+
+    buddy->onBuddyEvSubDlgEventState(prm);
 }
 
 // Call callbacks
@@ -1418,6 +1507,38 @@ void Endpoint::on_dtmf_event(pjsua_call_id call_id,
     job->prm.digit = string(buf);
     job->prm.duration = event->duration;
     job->prm.flags = event->flags;
+
+    Endpoint::instance().utilAddPendingJob(job);
+}
+
+struct PendingOnCallRxTextCallback : public PendingJob
+{
+    int call_id;
+    OnCallRxTextParam prm;
+
+    virtual void execute(bool is_pending)
+    {
+        PJ_UNUSED_ARG(is_pending);
+
+        Call *call = Call::lookup(call_id);
+        if (!call)
+            return;
+
+        call->onCallRxText(prm);
+    }
+};
+
+void Endpoint::on_call_rx_text(pjsua_call_id call_id,
+                               const pjsua_txt_stream_data *data)
+{
+    Call *call = Call::lookup(call_id);
+    if (!call) {
+        return;
+    }
+
+    PendingOnCallRxTextCallback *job = new PendingOnCallRxTextCallback;
+    job->call_id = call_id;
+    job->prm.fromPj(*data);
 
     Endpoint::instance().utilAddPendingJob(job);
 }
@@ -1843,7 +1964,7 @@ void Endpoint::on_create_media_transport_srtp(pjsua_call_id call_id,
         crypto.key   = pj2Str(srtp_opt->crypto[i].key);
         crypto.name  = pj2Str(srtp_opt->crypto[i].name);
         crypto.flags = srtp_opt->crypto[i].flags;
-        prm.cryptos.push_back(crypto);
+        prm.cryptos.push_back(PJSUA2_MOVE(crypto));
     }
     
     call->onCreateMediaTransportSrtp(prm);
@@ -1957,6 +2078,8 @@ void Endpoint::libInit(const EpConfig &prmEpConfig) PJSUA2_THROW(Error)
     ua_cfg.cb.on_mwi_info               = &Endpoint::on_mwi_info;
     ua_cfg.cb.on_buddy_state            = &Endpoint::on_buddy_state;
     ua_cfg.cb.on_buddy_evsub_state      = &Endpoint::on_buddy_evsub_state;
+    ua_cfg.cb.on_buddy_dlg_event_state  = &Endpoint::on_buddy_dlg_event_state;
+    ua_cfg.cb.on_buddy_evsub_dlg_event_state = &Endpoint::on_buddy_evsub_dlg_event_state;
     ua_cfg.cb.on_acc_find_for_incoming  = &Endpoint::on_acc_find_for_incoming;
     ua_cfg.cb.on_ip_change_progress     = &Endpoint::on_ip_change_progress;
 
@@ -1971,6 +2094,7 @@ void Endpoint::libInit(const EpConfig &prmEpConfig) PJSUA2_THROW(Error)
     //ua_cfg.cb.on_dtmf_digit             = &Endpoint::on_dtmf_digit;
     //ua_cfg.cb.on_dtmf_digit2            = &Endpoint::on_dtmf_digit2;
     ua_cfg.cb.on_dtmf_event             = &Endpoint::on_dtmf_event;
+    ua_cfg.cb.on_call_rx_text           = &Endpoint::on_call_rx_text;
     ua_cfg.cb.on_call_transfer_request2 = &Endpoint::on_call_transfer_request2;
     ua_cfg.cb.on_call_transfer_status   = &Endpoint::on_call_transfer_status;
     ua_cfg.cb.on_call_replace_request2  = &Endpoint::on_call_replace_request2;
@@ -1987,6 +2111,8 @@ void Endpoint::libInit(const EpConfig &prmEpConfig) PJSUA2_THROW(Error)
     ua_cfg.cb.on_stun_resolution_complete = 
         &Endpoint::stun_resolve_cb;
     ua_cfg.cb.on_rejected_incoming_call = &Endpoint::on_rejected_incoming_call;
+    ua_cfg.cb.on_conf_op_completed      = &Endpoint::on_conf_op_completed;
+    ua_cfg.cb.on_vid_conf_op_completed  = &Endpoint::on_vid_conf_op_completed;
 
     /* Init! */
     PJSUA2_CHECK_EXPR( pjsua_init(&ua_cfg, &log_cfg, &med_cfg) );
@@ -2115,6 +2241,13 @@ void Endpoint::libDestroy(unsigned flags) PJSUA2_THROW(Error)
     threadDescMap.clear();
 
     PJSUA2_CHECK_RAISE_ERROR(status);
+}
+
+pj_oshandle_t Endpoint::libGetSipIoqueueHandle() 
+{
+    pjsip_endpoint* endp = pjsua_get_pjsip_endpt();
+    pj_ioqueue_t* ioq = pjsip_endpt_get_ioqueue(endp);
+    return pj_ioqueue_get_os_handle(ioq);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2480,7 +2613,7 @@ CodecInfoVector2 Endpoint::codecEnum2() const PJSUA2_THROW(Error)
     for (unsigned i = 0; i<count; ++i) {
         CodecInfo codec_info;
         codec_info.fromPj(pj_codec[i]);
-        civ2.push_back(codec_info);
+        civ2.push_back(PJSUA2_MOVE(codec_info));
     }
     return civ2;
 }
@@ -2627,7 +2760,7 @@ CodecInfoVector2 Endpoint::videoCodecEnum2() const PJSUA2_THROW(Error)
     for (unsigned i = 0; i<count; ++i) {
         CodecInfo codec_info;
         codec_info.fromPj(pj_codec[i]);
-        civ2.push_back(codec_info);
+        civ2.push_back(PJSUA2_MOVE(codec_info));
     }
 #endif
     return civ2;
@@ -2767,4 +2900,20 @@ void Endpoint::on_rejected_incoming_call(
         prm.rdata.fromPj(*param->rdata);
 
     Endpoint::instance().onRejectedIncomingCall(prm);
+}
+
+void Endpoint::on_conf_op_completed(const pjmedia_conf_op_info *info)
+{
+    OnAudioMediaOpCompletedParam prm;
+    prm.fromPj(*info);
+
+    Endpoint::instance().onAudioMediaOpCompleted(prm);
+}
+
+void Endpoint::on_vid_conf_op_completed(const pjmedia_vid_conf_op_info *info)
+{
+    OnVideoMediaOpCompletedParam prm;
+    prm.fromPj(*info);
+
+    Endpoint::instance().onVideoMediaOpCompleted(prm);
 }
